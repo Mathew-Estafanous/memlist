@@ -29,6 +29,11 @@ type Config struct {
 	// also increase the chances of an indirect probe succeeding. This is at the
 	// expense of bandwidth usage.
 	IndirectChecks int
+
+	// Transport is an optional field for the client to define custom
+	// communication among other nodes. If this field is left nil, Create will
+	// by default use a NetTransport in the Member.
+	Transport Transport
 }
 
 // DefaultLocalConfig returns a configuration that is set up for a local environment.
