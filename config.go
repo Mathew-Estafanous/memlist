@@ -13,7 +13,7 @@ type Config struct {
 	// Configuration related to which address and port the node will
 	// bind to and listen on.
 	BindAddr string
-	BindPort int
+	BindPort uint16
 
 	// ProbeInterval is the time between attempts at random probes towards
 	// another node. Decreasing the interval will result in more frequent
@@ -40,11 +40,11 @@ type Config struct {
 func DefaultLocalConfig() *Config {
 	host, _ := os.Hostname()
 	return &Config{
-		Name: host,
-		BindAddr: "",
-		BindPort: 7990,
-		ProbeTimeout: 200 * time.Millisecond,
-		ProbeInterval: 1 * time.Second,
+		Name:           host,
+		BindAddr:       "",
+		BindPort:       7990,
+		ProbeTimeout:   200 * time.Millisecond,
+		ProbeInterval:  1 * time.Second,
 		IndirectChecks: 1,
 	}
 }

@@ -1,6 +1,21 @@
 package memlist
 
-import "net"
+import (
+	"fmt"
+	"net"
+)
+
+type messageType uint8
+
+const (
+	ping messageType = iota
+	indirectPing
+	ack
+)
+
+func logFromAddr(from net.Addr) string {
+	return fmt.Sprintf("(from = %s)", from.String())
+}
 
 // Packet represents the incoming packet and the peer's associated
 // data including the message payload.
