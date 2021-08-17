@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type StateType int
@@ -27,10 +29,15 @@ type node struct {
 	state StateType
 }
 
+type handler func(a ackResp, from net.Addr)
+
 type Member struct {
 	sequenceNum uint32
 	conf        *Config
 	transport   Transport
+
+	ackMu       sync.Mutex
+	ackHandlers map[uint32]handler
 
 	nodeMap  map[string]*node
 	numNodes uint32
@@ -110,50 +117,120 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	dec := gob.NewDecoder(bytes.NewReader(b[1:]))
 	switch messageType(b[0]) {
 	case ping:
-		var p pingReq
-		dec.Decode(&p)
-
-		if p.Node != m.conf.Name {
-			m.logger.Println("[WARNING] Received an unexpected ping for node. %s ")
-			return
-		}
-
-		ackR := ackResp{SeqNo: p.SeqNo}
-		b = encodeResponse(ack, &ackR)
-		var addr string
-		if p.FromPort > 0 && p.FromAddr != "" {
-			addr = net.JoinHostPort(p.FromAddr, strconv.Itoa(int(p.FromPort)))
-		} else {
-			addr = from.String()
-		}
-
-		// send ack response to address with the payload.
-		if err := m.transport.SendTo(b, addr); err != nil {
-			m.logger.Printf("[ERROR] Encountered an issue when sending ack response. %v", err)
-		}
+		m.handlePing(dec, from)
 	case indirectPing:
-		var ind indirectPingReq
-		dec.Decode(&ind)
-
-		p := &pingReq{
-			SeqNo:    m.nextSeqNum(),
-			Node:     ind.Node,
-			FromAddr: m.conf.BindAddr,
-			FromPort: m.conf.BindPort,
-		}
-
-		b = encodeResponse(ping, &p)
-		var addr string
-		addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
-		if err := m.transport.SendTo(b, addr); err != nil {
-			m.logger.Printf("[ERROR] Encountered an issue when sending ping. %v", err)
-		}
+		m.handleIndirectPing(dec, from)
 	case ack:
-
+		m.handleAck(dec, from)
 	default:
 		m.logger.Printf("[ERROR] Invalid message type (%v) is not available. %s", logFromAddr(from))
 		return
 	}
+}
+
+func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
+	var p pingReq
+	if err := dec.Decode(&p); err != nil {
+		log.Printf("[ERROR] Failed to decode byte slice into PingReq. %v", err)
+		return
+	}
+
+	if p.Node != m.conf.Name {
+		m.logger.Println("[WARNING] Received an unexpected ping for node. %s ")
+		return
+	}
+
+	ackR := ackResp{SeqNo: p.SeqNo}
+	b := encodeResponse(ack, &ackR)
+	var addr string
+	if p.FromPort > 0 && p.FromAddr != "" {
+		addr = net.JoinHostPort(p.FromAddr, strconv.Itoa(int(p.FromPort)))
+	} else {
+		addr = from.String()
+	}
+
+	// send ack response to address with the payload.
+	if err := m.transport.SendTo(b, addr); err != nil {
+		m.logger.Printf("[ERROR] Encountered an issue when sending ack response. %v", err)
+	}
+}
+
+func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
+	var ind indirectPingReq
+	if err := dec.Decode(&ind); err != nil {
+		log.Printf("[ERROR] Failed to decode byte slice into IndirectPingReq. %v", err)
+		return
+	}
+
+	p := &pingReq{
+		SeqNo:    m.nextSeqNum(),
+		Node:     ind.Node,
+		FromAddr: m.conf.BindAddr,
+		FromPort: m.conf.BindPort,
+	}
+
+	// Setup an ack handler to route the ack response back to node that sent the indirect ping request.
+	ackRespHandler := func(a ackResp, from net.Addr) {
+		if a.SeqNo != p.SeqNo {
+			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.SeqNo, p.SeqNo)
+			return
+		}
+		ackR := ackResp{SeqNo: ind.SeqNo}
+		b := encodeResponse(ack, &ackR)
+
+		var addr string
+		if ind.FromPort > 0 && ind.FromAddr != "" {
+			addr = net.JoinHostPort(ind.FromAddr, strconv.Itoa(int(ind.FromPort)))
+		} else {
+			addr = from.String()
+		}
+
+		if err := m.transport.SendTo(b, addr); err != nil {
+			m.logger.Printf("[ERROR] Encountered an issue when sending ack response. %v", err)
+		}
+	}
+	// Add the handler so that it gets called
+	m.addAckHandler(ackRespHandler, p.SeqNo, m.conf.ProbeTimeout)
+
+	b := encodeResponse(ping, &p)
+	var addr string
+	addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
+	if err := m.transport.SendTo(b, addr); err != nil {
+		m.logger.Printf("[ERROR] Encountered an issue when sending ping. %v", err)
+	}
+}
+
+func (m *Member) handleAck(dec *gob.Decoder, from net.Addr) {
+	var a ackResp
+	if err := dec.Decode(&a); err != nil {
+		log.Printf("[ERROR] Failed to decode byte slice into AckResponse. %v", err)
+		return
+	}
+	
+	m.ackMu.Lock()
+	ah, ok := m.ackHandlers[a.SeqNo]
+	delete(m.ackHandlers, a.SeqNo)
+	if !ok {
+		log.Printf("[WARNING] Couldn't find a ah for sequence number %v", a.SeqNo)
+		return
+	}
+	ah(a, from)
+	m.ackMu.Unlock()
+}
+
+// addAckHandler is used to attach the provided handler with a specific ack response. When an
+// ack message with the same sequence number is received, the handler will be called.
+func (m *Member) addAckHandler(h handler, seqNo uint32, timeout time.Duration) {
+	m.ackMu.Lock()
+	defer m.ackMu.Unlock()
+	m.ackHandlers[seqNo] = h
+
+	// Delete ack handler after specific timeout to prevent growth in map.
+	time.AfterFunc(timeout, func() {
+		m.ackMu.Lock()
+		defer m.ackMu.Unlock()
+		delete(m.ackHandlers, seqNo)
+	})
 }
 
 func encodeResponse(tp messageType, e interface{}) []byte {

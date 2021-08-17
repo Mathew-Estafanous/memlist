@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// Config
 type Config struct {
 	// A name for the node that is unique to the entire cluster.
 	Name string
