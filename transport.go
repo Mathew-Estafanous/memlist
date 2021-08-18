@@ -2,6 +2,7 @@ package memlist
 
 import (
 	"fmt"
+	"log"
 	"net"
 )
 
@@ -62,7 +63,7 @@ type Transport interface {
 
 	// Packets returns a channel that is used to receive incoming packets
 	// from other peers.
-	Packets() chan *Packet
+	Packets() <-chan *Packet
 
 	// Shutdown allows for the transport to clean up all listeners safely.
 	Shutdown() error
@@ -97,14 +98,23 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	}
 	t.udpCon = udpCon
 
+	go t.listenForPacket()
 	return t, nil
 }
 
 func (n *NetTransport) SendTo(b []byte, addr string) error {
-	panic("implement me")
+	add, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	if _, err = n.udpCon.WriteTo(b, add); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (n *NetTransport) Packets() chan *Packet {
+func (n *NetTransport) Packets() <-chan *Packet {
 	return n.packet
 }
 
@@ -112,4 +122,30 @@ func (n *NetTransport) Shutdown() error {
 	close(n.shutdown)
 	close(n.packet)
 	return n.udpCon.Close()
+}
+
+func (n *NetTransport) listenForPacket() {
+	for {
+		var b []byte
+		_, addr, err := n.udpCon.ReadFromUDP(b)
+		if err != nil {
+			select {
+			case <-n.shutdown:
+				break
+			default:
+				log.Printf("[ERROR] Failed to read received UDP packet: %v", err)
+				continue
+			}
+		}
+
+		if len(b) <= 1 {
+			log.Printf("[ERROR] Byte packet is too short (%v), must be longer.", len(b))
+			continue
+		}
+
+		n.packet <- &Packet{
+			From: addr,
+			Buf:  b,
+		}
+	}
 }
