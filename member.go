@@ -47,14 +47,19 @@ type Member struct {
 }
 
 func Create(conf *Config) (*Member, error) {
-	if conf.Transport == nil {
-		// TODO: Create the default transport.
+	transport := conf.Transport
+	if transport == nil {
+		t, err := NewNetTransport(conf.BindAddr, conf.BindPort)
+		if err != nil {
+			return nil, err
+		}
+		transport = t
 	}
 
 	l := log.New(os.Stdout, fmt.Sprintf("[%v]", conf.Name), log.LstdFlags)
 	mem := &Member{
 		conf:       conf,
-		transport:  conf.Transport,
+		transport:  transport,
 		nodeMap:    make(map[string]*node),
 		shutdownCh: make(chan struct{}),
 		logger:     l,
@@ -66,35 +71,6 @@ func Create(conf *Config) (*Member, error) {
 
 func (m *Member) nextSeqNum() uint32 {
 	return atomic.AddUint32(&m.sequenceNum, 1)
-}
-
-type pingReq struct {
-	SeqNo uint32
-
-	// Node is the name of the intended recipient node and is used as a
-	// verification for the receiving node.
-	Node string
-
-	// The address and port of the node that is sending the ping request.
-	FromAddr string
-	FromPort uint16
-}
-
-type indirectPingReq struct {
-	SeqNo uint32
-
-	// Node is the name of the node that the ping is targeted towards.
-	Node     string
-	NodeAddr string
-	NodePort uint16
-
-	// The address and port of the node that is sending the ping request.
-	FromAddr string
-	FromPort uint16
-}
-
-type ackResp struct {
-	SeqNo uint32
 }
 
 func (m *Member) packetListen() {
@@ -206,7 +182,7 @@ func (m *Member) handleAck(dec *gob.Decoder, from net.Addr) {
 		log.Printf("[ERROR] Failed to decode byte slice into AckResponse. %v", err)
 		return
 	}
-	
+
 	m.ackMu.Lock()
 	ah, ok := m.ackHandlers[a.SeqNo]
 	delete(m.ackHandlers, a.SeqNo)
@@ -238,4 +214,8 @@ func encodeResponse(tp messageType, e interface{}) []byte {
 	enc := gob.NewEncoder(buf)
 	enc.Encode(e)
 	return buf.Bytes()
+}
+
+func logFromAddr(from net.Addr) string {
+	return fmt.Sprintf("(from = %s)", from.String())
 }

@@ -13,8 +13,33 @@ const (
 	ack
 )
 
-func logFromAddr(from net.Addr) string {
-	return fmt.Sprintf("(from = %s)", from.String())
+type pingReq struct {
+	SeqNo uint32
+
+	// Node is the name of the intended recipient node and is used as a
+	// verification for the receiving node.
+	Node string
+
+	// The address and port of the node that is sending the ping request.
+	FromAddr string
+	FromPort uint16
+}
+
+type indirectPingReq struct {
+	SeqNo uint32
+
+	// Node is the name of the node that the ping is targeted towards.
+	Node     string
+	NodeAddr string
+	NodePort uint16
+
+	// The address and port of the node that is sending the ping request.
+	FromAddr string
+	FromPort uint16
+}
+
+type ackResp struct {
+	SeqNo uint32
 }
 
 // Packet represents the incoming packet and the peer's associated
@@ -41,4 +66,50 @@ type Transport interface {
 
 	// Shutdown allows for the transport to clean up all listeners safely.
 	Shutdown() error
+}
+
+type NetTransport struct {
+	udpCon   *net.UDPConn
+	packet   chan *Packet
+	shutdown chan struct{}
+}
+
+func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
+	udpAddr := &net.UDPAddr{
+		Port: int(port),
+		IP:   net.ParseIP(addr),
+	}
+
+	var ok bool
+	t := &NetTransport{
+		packet:   make(chan *Packet),
+		shutdown: make(chan struct{}),
+	}
+	defer func() {
+		if !ok {
+			t.Shutdown()
+		}
+	}()
+
+	udpCon, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start UDP connection on address %v port %v: %v", addr, port, err)
+	}
+	t.udpCon = udpCon
+
+	return t, nil
+}
+
+func (n *NetTransport) SendTo(b []byte, addr string) error {
+	panic("implement me")
+}
+
+func (n *NetTransport) Packets() chan *Packet {
+	return n.packet
+}
+
+func (n *NetTransport) Shutdown() error {
+	close(n.shutdown)
+	close(n.packet)
+	return n.udpCon.Close()
 }
