@@ -24,8 +24,8 @@ type Config struct {
 	ProbeTimeout  time.Duration
 
 	// IndirectChecks is the number of nodes that will be contacted in the case
-	// that an indirect probe is required. Increasing the number of checks will
-	// also increase the chances of an indirect probe succeeding. This is at the
+	// that an indirect sendProbe is required. Increasing the number of checks will
+	// also increase the chances of an indirect sendProbe succeeding. This is at the
 	// expense of bandwidth usage.
 	IndirectChecks int
 

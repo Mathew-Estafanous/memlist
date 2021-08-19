@@ -39,6 +39,7 @@ type Member struct {
 	ackMu       sync.Mutex
 	ackHandlers map[uint32]handler
 
+	nodeMu   sync.Mutex
 	nodeMap  map[string]*node
 	numNodes uint32
 
@@ -57,7 +58,7 @@ func Create(conf *Config) (*Member, error) {
 	}
 
 	l := log.New(os.Stdout, fmt.Sprintf("[%v]", conf.Name), log.LstdFlags)
-	mem := &Member{
+	m := &Member{
 		conf:       conf,
 		transport:  transport,
 		nodeMap:    make(map[string]*node),
@@ -65,8 +66,9 @@ func Create(conf *Config) (*Member, error) {
 		logger:     l,
 	}
 
-	go mem.packetListen()
-	return mem, nil
+	go m.packetListen()
+	go m.runSchedule()
+	return m, nil
 }
 
 func (m *Member) nextSeqNum() uint32 {
@@ -112,7 +114,7 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	if p.Node != m.conf.Name {
-		m.logger.Println("[WARNING] Received an unexpected ping for node. %s ")
+		m.logger.Println("[WARNING] Received an unexpected sendProbe for node. %s ")
 		return
 	}
 
@@ -145,7 +147,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
 		FromPort: m.conf.BindPort,
 	}
 
-	// Setup an ack handler to route the ack response back to node that sent the indirect ping request.
+	// Setup an ack handler to route the ack response back to node that sent the indirect sendProbe request.
 	ackRespHandler := func(a ackResp, from net.Addr) {
 		if a.SeqNo != p.SeqNo {
 			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.SeqNo, p.SeqNo)
@@ -172,7 +174,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
 	var addr string
 	addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
 	if err := m.transport.SendTo(b, addr); err != nil {
-		m.logger.Printf("[ERROR] Encountered an issue when sending ping. %v", err)
+		m.logger.Printf("[ERROR] Encountered an issue when sending sendProbe. %v", err)
 	}
 }
 
@@ -207,6 +209,116 @@ func (m *Member) addAckHandler(h handler, seqNo uint32, timeout time.Duration) {
 		defer m.ackMu.Unlock()
 		delete(m.ackHandlers, seqNo)
 	})
+}
+
+func (m *Member) runSchedule() {
+	for {
+		select {
+		case <-time.After(m.conf.ProbeInterval):
+			m.sendProbe()
+		case <-m.shutdownCh:
+			return
+		}
+	}
+}
+
+func (m *Member) sendProbe() {
+	if m.numNodes == 0 {
+		return
+	}
+
+	// arbitrarily select a peer node from the map.
+	var key string
+	m.nodeMu.Lock()
+	for k := range m.nodeMap {
+		key = k
+		break
+	}
+	sendNode := m.nodeMap[key]
+	m.nodeMu.Unlock()
+
+	// Make ping/probe request and send it to the selected node.
+	p := &pingReq{
+		SeqNo:    m.nextSeqNum(),
+		Node:     sendNode.name,
+		FromPort: m.conf.BindPort,
+		FromAddr: m.conf.BindAddr,
+	}
+	b := encodeResponse(ping, p)
+	addr := net.JoinHostPort(sendNode.addr.String(), strconv.Itoa(int(sendNode.port)))
+	if err := m.transport.SendTo(b, addr); err != nil {
+		log.Printf("[ERROR] Failed to send initial ping to node %v: %v", sendNode.name, err)
+	}
+
+	// Add handler that closes response channel if an "ack" is returned in time.
+	responded := make(chan bool)
+	h := func(a ackResp, _ net.Addr) {
+		if a.SeqNo != p.SeqNo {
+			log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.SeqNo, p.SeqNo)
+			return
+		}
+		close(responded)
+	}
+	m.addAckHandler(h, p.SeqNo, m.conf.ProbeTimeout)
+
+	// Wait for "ack" response until timeout. In which we switch making an indirect probe.
+	select {
+	case <-time.After(m.conf.ProbeTimeout):
+		m.sendIndirectProbe(sendNode)
+	case <-responded:
+		sendNode.state = Alive
+		return
+	}
+}
+
+func (m *Member) sendIndirectProbe(send *node) {
+	var nodes []*node
+	m.nodeMu.Lock()
+	// randomly select other nodes to ask for indirect probes
+	for k, v := range m.nodeMap {
+		if k == send.name {
+			continue
+		}
+
+		nodes = append(nodes, v)
+		if len(nodes) >= m.conf.IndirectChecks {
+			break
+		}
+	}
+	m.nodeMu.Unlock()
+
+	responded := make(chan bool)
+	for _, n := range nodes {
+		indPing := &indirectPingReq{
+			SeqNo:    m.nextSeqNum(),
+			Node:     send.name,
+			NodeAddr: send.addr.String(),
+			NodePort: send.port,
+			FromPort: m.conf.BindPort,
+			FromAddr: m.conf.BindAddr,
+		}
+		b := encodeResponse(indirectPing, indPing)
+		addr := net.JoinHostPort(m.conf.BindAddr, strconv.Itoa(int(m.conf.BindPort)))
+		if err := m.transport.SendTo(b, addr); err != nil {
+			log.Printf("[ERROR] Failed to send initial ping to node %v: %v", n.name, err)
+		}
+
+		h := func(a ackResp, from net.Addr) {
+			if a.SeqNo != indPing.SeqNo {
+				log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.SeqNo, indPing.SeqNo)
+				return
+			}
+			responded <- true
+		}
+		m.addAckHandler(h, indPing.SeqNo, m.conf.ProbeInterval)
+	}
+
+	select {
+	case <-responded:
+		return
+	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
+		send.state = Dead
+	}
 }
 
 func encodeResponse(tp messageType, e interface{}) []byte {
