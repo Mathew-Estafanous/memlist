@@ -15,32 +15,32 @@ const (
 )
 
 type pingReq struct {
-	SeqNo uint32
+	ReqNo uint32
 
-	// Node is the name of the intended recipient node and is used as a
-	// verification for the receiving node.
+	// Node is the Name of the intended recipient Node and is used as a
+	// verification for the receiving Node.
 	Node string
 
-	// The address and port of the node that is sending the sendProbe request.
+	// The address and Port of the Node that is sending the sendProbe request.
 	FromAddr string
 	FromPort uint16
 }
 
 type indirectPingReq struct {
-	SeqNo uint32
+	ReqNo uint32
 
-	// Node is the name of the node that the sendProbe is targeted towards.
+	// Node is the Name of the Node that the sendProbe is targeted towards.
 	Node     string
 	NodeAddr string
 	NodePort uint16
 
-	// The address and port of the node that is sending the sendProbe request.
+	// The address and Port of the Node that is sending the sendProbe request.
 	FromAddr string
 	FromPort uint16
 }
 
 type ackResp struct {
-	SeqNo uint32
+	ReqNo uint32
 }
 
 // Packet represents the incoming packet and the peer's associated
@@ -94,7 +94,7 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 
 	udpCon, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start UDP connection on address %v port %v: %v", addr, port, err)
+		return nil, fmt.Errorf("failed to start UDP connection on address %v Port %v: %v", addr, port, err)
 	}
 	t.udpCon = udpCon
 

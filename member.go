@@ -21,37 +21,50 @@ const (
 	Left
 )
 
-// node represents a single node within the cluster.
-type node struct {
-	name  string
-	addr  net.IP
-	port  uint16
-	state StateType
+// Node represents a single node within the cluster and their
+// state within the cluster.
+type Node struct {
+	Name string
+	Addr  net.IP
+	Port  uint16
+	State StateType
 }
 
 type handler func(a ackResp, from net.Addr)
 
 type Member struct {
-	sequenceNum uint32
-	conf        *Config
-	transport   Transport
+	name          string
+	requestNumber uint32
+
+	conf      *Config
+	transport Transport
 
 	ackMu       sync.Mutex
 	ackHandlers map[uint32]handler
 
 	nodeMu   sync.Mutex
-	nodeMap  map[string]*node
+	nodeMap  map[string]*Node
 	numNodes uint32
 
 	shutdownCh chan struct{}
+	hasStopped bool
 	logger     *log.Logger
 }
 
+// Create a new member using the given configuration file. The member
+// will start listening for packets that are sent from the Transport.
+//
+// The Member has not joined any cluster at this point. To join a cluster
+// of nodes, look into using Join.
+//
+// Upon creating a member with the Config, the data must NOT be altered
+// and is assumed to remain unchanged throughout the life of the Member.
 func Create(conf *Config) (*Member, error) {
 	transport := conf.Transport
 	if transport == nil {
 		t, err := NewNetTransport(conf.BindAddr, conf.BindPort)
 		if err != nil {
+			// TODO: wrap errors so that the API doesn't expose internal errors.
 			return nil, err
 		}
 		transport = t
@@ -61,18 +74,67 @@ func Create(conf *Config) (*Member, error) {
 	m := &Member{
 		conf:       conf,
 		transport:  transport,
-		nodeMap:    make(map[string]*node),
+		nodeMap:    make(map[string]*Node),
 		shutdownCh: make(chan struct{}),
 		logger:     l,
 	}
 
 	go m.packetListen()
-	go m.runSchedule()
 	return m, nil
 }
 
-func (m *Member) nextSeqNum() uint32 {
-	return atomic.AddUint32(&m.sequenceNum, 1)
+// Join will attempt to join the member into a cluster of nodes by connecting
+// to the Node at the given address. An error will be return if the member
+// failed to join a cluster.
+func (m *Member) Join(addr string) error {
+	// TODO: Implement join cluster functionality.
+	go m.runSchedule()
+	return nil
+}
+
+// AllNodes will return every known Alive node at the time.
+func (m *Member) AllNodes() []Node {
+	m.nodeMu.Lock()
+	defer m.nodeMu.Unlock()
+	var nodes []Node
+	for _, n := range m.nodeMap {
+		if n.State == Alive {
+			nodes = append(nodes, *n)
+		}
+	}
+	return nodes
+}
+
+// Shutdown will stop all background processes such as responded to received
+// packets. No message will be sent regarding leaving the cluster and as a
+// result the member will eventually be considered 'dead'.
+//
+// This method should only be called once. If called more than once, a non-nil
+// error will be returned.
+//
+// If you want your member to notify other members about leaving the cluster
+// look into using Leave instead.
+func (m *Member) Shutdown() error {
+	if m.hasStopped {
+		return fmt.Errorf("member has already been shutdown")
+	}
+
+	if err := m.transport.Shutdown(); err != nil {
+		return err
+	}
+	close(m.shutdownCh)
+	return nil
+}
+
+// Leave will safely stop all running processes and will notify other nodes
+// that it will be leaving the cluster. This is a blocking operation until
+// the member has successfully left the cluster.
+func (m *Member) Leave() error {
+	return nil
+}
+
+func (m *Member) nextReqNum() uint32 {
+	return atomic.AddUint32(&m.requestNumber, 1)
 }
 
 func (m *Member) packetListen() {
@@ -114,11 +176,11 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	if p.Node != m.conf.Name {
-		m.logger.Println("[WARNING] Received an unexpected sendProbe for node. %s ")
+		m.logger.Println("[WARNING] Received an unexpected sendProbe for Node. %s ")
 		return
 	}
 
-	ackR := ackResp{SeqNo: p.SeqNo}
+	ackR := ackResp{ReqNo: p.ReqNo}
 	b := encodeResponse(ack, &ackR)
 	var addr string
 	if p.FromPort > 0 && p.FromAddr != "" {
@@ -141,19 +203,19 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	p := &pingReq{
-		SeqNo:    m.nextSeqNum(),
+		ReqNo:    m.nextReqNum(),
 		Node:     ind.Node,
 		FromAddr: m.conf.BindAddr,
 		FromPort: m.conf.BindPort,
 	}
 
-	// Setup an ack handler to route the ack response back to node that sent the indirect sendProbe request.
+	// Setup an ack handler to route the ack response back to Node that sent the indirect sendProbe request.
 	ackRespHandler := func(a ackResp, from net.Addr) {
-		if a.SeqNo != p.SeqNo {
-			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.SeqNo, p.SeqNo)
+		if a.ReqNo != p.ReqNo {
+			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.ReqNo, p.ReqNo)
 			return
 		}
-		ackR := ackResp{SeqNo: ind.SeqNo}
+		ackR := ackResp{ReqNo: ind.ReqNo}
 		b := encodeResponse(ack, &ackR)
 
 		var addr string
@@ -168,7 +230,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
 		}
 	}
 	// Add the handler so that it gets called
-	m.addAckHandler(ackRespHandler, p.SeqNo, m.conf.ProbeTimeout)
+	m.addAckHandler(ackRespHandler, p.ReqNo, m.conf.ProbeTimeout)
 
 	b := encodeResponse(ping, &p)
 	var addr string
@@ -186,10 +248,10 @@ func (m *Member) handleAck(dec *gob.Decoder, from net.Addr) {
 	}
 
 	m.ackMu.Lock()
-	ah, ok := m.ackHandlers[a.SeqNo]
-	delete(m.ackHandlers, a.SeqNo)
+	ah, ok := m.ackHandlers[a.ReqNo]
+	delete(m.ackHandlers, a.ReqNo)
 	if !ok {
-		log.Printf("[WARNING] Couldn't find a ah for sequence number %v", a.SeqNo)
+		log.Printf("[WARNING] Couldn't find a ah for sequence number %v", a.ReqNo)
 		return
 	}
 	ah(a, from)
@@ -227,7 +289,7 @@ func (m *Member) sendProbe() {
 		return
 	}
 
-	// arbitrarily select a peer node from the map.
+	// arbitrarily select a peer Node from the map.
 	var key string
 	m.nodeMu.Lock()
 	for k := range m.nodeMap {
@@ -237,46 +299,46 @@ func (m *Member) sendProbe() {
 	sendNode := m.nodeMap[key]
 	m.nodeMu.Unlock()
 
-	// Make ping/probe request and send it to the selected node.
+	// Make ping/probe request and send it to the selected Node.
 	p := &pingReq{
-		SeqNo:    m.nextSeqNum(),
-		Node:     sendNode.name,
+		ReqNo:    m.nextReqNum(),
+		Node:     sendNode.Name,
 		FromPort: m.conf.BindPort,
 		FromAddr: m.conf.BindAddr,
 	}
 	b := encodeResponse(ping, p)
-	addr := net.JoinHostPort(sendNode.addr.String(), strconv.Itoa(int(sendNode.port)))
+	addr := net.JoinHostPort(sendNode.Addr.String(), strconv.Itoa(int(sendNode.Port)))
 	if err := m.transport.SendTo(b, addr); err != nil {
-		log.Printf("[ERROR] Failed to send initial ping to node %v: %v", sendNode.name, err)
+		log.Printf("[ERROR] Failed to send initial ping to Node %v: %v", sendNode.Name, err)
 	}
 
 	// Add handler that closes response channel if an "ack" is returned in time.
 	responded := make(chan bool)
 	h := func(a ackResp, _ net.Addr) {
-		if a.SeqNo != p.SeqNo {
-			log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.SeqNo, p.SeqNo)
+		if a.ReqNo != p.ReqNo {
+			log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.ReqNo, p.ReqNo)
 			return
 		}
 		close(responded)
 	}
-	m.addAckHandler(h, p.SeqNo, m.conf.ProbeTimeout)
+	m.addAckHandler(h, p.ReqNo, m.conf.ProbeTimeout)
 
 	// Wait for "ack" response until timeout. In which we switch making an indirect probe.
 	select {
 	case <-time.After(m.conf.ProbeTimeout):
 		m.sendIndirectProbe(sendNode)
 	case <-responded:
-		sendNode.state = Alive
+		sendNode.State = Alive
 		return
 	}
 }
 
-func (m *Member) sendIndirectProbe(send *node) {
-	var nodes []*node
+func (m *Member) sendIndirectProbe(send *Node) {
+	var nodes []*Node
 	m.nodeMu.Lock()
 	// randomly select other nodes to ask for indirect probes
 	for k, v := range m.nodeMap {
-		if k == send.name {
+		if k == send.Name {
 			continue
 		}
 
@@ -290,34 +352,35 @@ func (m *Member) sendIndirectProbe(send *node) {
 	responded := make(chan bool)
 	for _, n := range nodes {
 		indPing := &indirectPingReq{
-			SeqNo:    m.nextSeqNum(),
-			Node:     send.name,
-			NodeAddr: send.addr.String(),
-			NodePort: send.port,
+			ReqNo:    m.nextReqNum(),
+			Node:     send.Name,
+			NodeAddr: send.Addr.String(),
+			NodePort: send.Port,
 			FromPort: m.conf.BindPort,
 			FromAddr: m.conf.BindAddr,
 		}
 		b := encodeResponse(indirectPing, indPing)
 		addr := net.JoinHostPort(m.conf.BindAddr, strconv.Itoa(int(m.conf.BindPort)))
 		if err := m.transport.SendTo(b, addr); err != nil {
-			log.Printf("[ERROR] Failed to send initial ping to node %v: %v", n.name, err)
+			log.Printf("[ERROR] Failed to send initial ping to Node %v: %v", n.Name, err)
 		}
 
 		h := func(a ackResp, from net.Addr) {
-			if a.SeqNo != indPing.SeqNo {
-				log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.SeqNo, indPing.SeqNo)
+			if a.ReqNo != indPing.ReqNo {
+				log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.ReqNo, indPing.ReqNo)
 				return
 			}
 			responded <- true
 		}
-		m.addAckHandler(h, indPing.SeqNo, m.conf.ProbeInterval)
+		m.addAckHandler(h, indPing.ReqNo, m.conf.ProbeInterval)
 	}
 
 	select {
 	case <-responded:
 		return
 	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
-		send.state = Dead
+		log.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
+		send.State = Dead
 	}
 }
 

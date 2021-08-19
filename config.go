@@ -6,20 +6,20 @@ import (
 )
 
 type Config struct {
-	// A name for the node that is unique to the entire cluster.
+	// A Name for the Node that is unique to the entire cluster.
 	Name string
 
-	// Configuration related to which address and port the node will
+	// Configuration related to which address and Port the Node will
 	// bind to and listen on.
 	BindAddr string
 	BindPort uint16
 
 	// ProbeInterval is the time between attempts at random probes towards
-	// another node. Decreasing the interval will result in more frequent
+	// another Node. Decreasing the interval will result in more frequent
 	// checks at the cost of increased bandwidth usage.
 	//
-	// ProbeTimeout is the timeout a node will wait for an ACK response from
-	// any member before determining that the node is potentially unhealthy.
+	// ProbeTimeout is the timeout a Node will wait for an ACK response from
+	// any member before determining that the Node is potentially unhealthy.
 	ProbeInterval time.Duration
 	ProbeTimeout  time.Duration
 
