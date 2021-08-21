@@ -90,9 +90,10 @@ type NetTransport struct {
 }
 
 func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
-	var ok bool
+	ok := true
 	t := &NetTransport{
 		packetCh: make(chan *Packet),
+		streamCh: make(chan net.Conn),
 		shutdown: make(chan struct{}),
 	}
 	defer func() {
@@ -104,6 +105,7 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	udpAddr := &net.UDPAddr{Port: int(port), IP: net.ParseIP(addr)}
 	udpCon, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
+		ok = false
 		return nil, fmt.Errorf("failed to start UDP connection on address %v Port %v: %v", addr, port, err)
 	}
 	t.udpCon = udpCon
@@ -111,6 +113,7 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	tcpAddr := &net.TCPAddr{Port: int(port), IP: net.ParseIP(addr)}
 	tcpCon, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
+		ok = false
 		return nil, err
 	}
 	t.tcpLsn = tcpCon
@@ -159,8 +162,8 @@ func (n *NetTransport) Shutdown() error {
 // will format it into a Packet and forward it to the packet channel to be handled.
 func (n *NetTransport) listenForPacket() {
 	for {
-		var b []byte
-		_, addr, err := n.udpCon.ReadFromUDP(b)
+		b := make([]byte, 65536)
+		i, addr, err := n.udpCon.ReadFrom(b)
 		if err != nil {
 			select {
 			case <-n.shutdown:
@@ -178,7 +181,7 @@ func (n *NetTransport) listenForPacket() {
 
 		n.packetCh <- &Packet{
 			From: addr,
-			Buf:  b,
+			Buf:  b[:i],
 		}
 	}
 }
