@@ -13,7 +13,7 @@ const (
 	ping messageType = iota
 	indirectPing
 	ack
-	joining
+	joinSync
 )
 
 type pingReq struct {
@@ -74,7 +74,7 @@ type Transport interface {
 	// Stream returns a read only channel that is used to receive incoming
 	// streamCh connections from other peers. A streamCh is usually sent during
 	// attempts at syncing state between two peers.
-	Stream() <- chan net.Conn
+	Stream() <-chan net.Conn
 
 	// Shutdown allows for the transport to clean up all listeners safely.
 	Shutdown() error
@@ -101,7 +101,7 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 		}
 	}()
 
-	udpAddr := &net.UDPAddr{Port: int(port), IP:   net.ParseIP(addr)}
+	udpAddr := &net.UDPAddr{Port: int(port), IP: net.ParseIP(addr)}
 	udpCon, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start UDP connection on address %v Port %v: %v", addr, port, err)
@@ -145,7 +145,7 @@ func (n *NetTransport) Packets() <-chan *Packet {
 	return n.packetCh
 }
 
-func (n *NetTransport) Stream() <- chan net.Conn {
+func (n *NetTransport) Stream() <-chan net.Conn {
 	return n.streamCh
 }
 

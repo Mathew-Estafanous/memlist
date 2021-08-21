@@ -33,6 +33,10 @@ type Config struct {
 	// communication among other nodes. If this field is left nil, Create will
 	// by default use a NetTransport in the Member.
 	Transport Transport
+
+	// TCPTimeout is the time in which a TCP connection will be attempted. If no
+	// connection is made before reaching the timeout, then the attempt will fail.
+	TCPTimeout time.Duration
 }
 
 // DefaultLocalConfig returns a configuration that is set up for a local environment.
@@ -45,5 +49,6 @@ func DefaultLocalConfig() *Config {
 		ProbeTimeout:   200 * time.Millisecond,
 		ProbeInterval:  1 * time.Second,
 		IndirectChecks: 1,
+		TCPTimeout:     15 * time.Second,
 	}
 }

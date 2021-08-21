@@ -24,7 +24,7 @@ const (
 // Node represents a single node within the cluster and their
 // state within the cluster.
 type Node struct {
-	Name string
+	Name  string
 	Addr  net.IP
 	Port  uint16
 	State StateType
@@ -80,6 +80,7 @@ func Create(conf *Config) (*Member, error) {
 	}
 
 	go m.packetListen()
+	go m.streamListen()
 	return m, nil
 }
 
@@ -87,7 +88,36 @@ func Create(conf *Config) (*Member, error) {
 // to the Node at the given address. An error will be return if the member
 // failed to join a cluster.
 func (m *Member) Join(addr string) error {
-	// TODO: Implement join cluster functionality.
+	if m.conf.TCPTimeout == 0 {
+		m.conf.TCPTimeout = 10 * time.Second
+	}
+	conn, err := m.transport.DialAndConnect(addr, m.conf.TCPTimeout)
+	if err != nil {
+		m.logger.Printf("[ERROR] Failed to connect to host address: %v", err)
+		return fmt.Errorf("failed to connect to %s: %v", addr, err)
+	}
+
+	if _, err = conn.Write([]byte(byte(joinSync))); err != nil {
+		m.logger.Printf("[ERROR] Failed to send sync message to the host address: %v", err)
+		return fmt.Errorf("failed to join cluster: %v", err)
+	}
+
+	var b []byte
+	if _, err = conn.Read(b); err != nil {
+		m.logger.Printf("[ERROR] Couldn't receive data from host: %v", err)
+		return fmt.Errorf("failed to join cluster: %v", err)
+	}
+
+	var peerState map[string]*Node
+	dec := gob.NewDecoder(bytes.NewReader(b[1:]))
+	if err = dec.Decode(peerState); err != nil {
+		m.logger.Printf("[ERROR] Failed to decode received message: %v", err)
+		return fmt.Errorf("failed to sync with peer: %v", err)
+	}
+
+	m.nodeMu.Lock()
+	m.nodeMap = peerState
+	m.nodeMu.Unlock()
 	go m.runSchedule()
 	return nil
 }
@@ -148,9 +178,20 @@ func (m *Member) packetListen() {
 	}
 }
 
+func (m *Member) streamListen() {
+	for {
+		select {
+		case conn := <-m.transport.Stream():
+			m.handleConn(conn)
+		case <-m.shutdownCh:
+			return
+		}
+	}
+}
+
 func (m *Member) handlePacket(b []byte, from net.Addr) {
 	if len(b) <= 1 {
-		m.logger.Printf("[ERROR] Missing message type in payload. %s", logFromAddr(from))
+		m.logger.Println("[ERROR] Missing message type in payload.")
 		return
 	}
 
@@ -163,7 +204,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	case ack:
 		m.handleAck(dec, from)
 	default:
-		m.logger.Printf("[ERROR] Invalid message type (%v) is not available. %s", logFromAddr(from))
+		m.logger.Println("[ERROR] Invalid message type (%v) is not available.")
 		return
 	}
 }
@@ -380,7 +421,44 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		return
 	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
 		log.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
+		// TODO: Remove node from internal member list into a different list of dead members.
 		send.State = Dead
+	}
+}
+
+func (m *Member) handleConn(conn net.Conn) {
+	var b []byte
+	if _, err := conn.Read(b); err != nil {
+		m.logger.Println("[INFO] ", err)
+		return
+	}
+
+	if len(b) < 1 {
+		m.logger.Printf("[ERROR] Byte message is too short (%v), it must include message type", len(b))
+		return
+	}
+
+	switch messageType(b[0]) {
+	case joinSync:
+		dec := gob.NewDecoder(bytes.NewReader(b[1:]))
+		var joiningPeer Node
+		if err := dec.Decode(&joiningPeer); err != nil {
+			m.logger.Printf("[ERROR] Failed to decode message from joining peer: %v", err)
+			return
+		}
+
+		b := encodeResponse(joinSync, m.nodeMap)
+		if _, err := conn.Write(b); err != nil {
+			m.logger.Printf("[ERROR] Failed to send response with current state: %v", err)
+			return
+		}
+
+		m.nodeMu.Lock()
+		m.nodeMap[joiningPeer.Name] = &joiningPeer
+		m.nodeMu.Unlock()
+	default:
+		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", b[0])
+		return
 	}
 }
 
@@ -389,8 +467,4 @@ func encodeResponse(tp messageType, e interface{}) []byte {
 	enc := gob.NewEncoder(buf)
 	enc.Encode(e)
 	return buf.Bytes()
-}
-
-func logFromAddr(from net.Addr) string {
-	return fmt.Sprintf("(from = %s)", from.String())
 }
