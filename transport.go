@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 type messageType uint8
@@ -12,6 +13,7 @@ const (
 	ping messageType = iota
 	indirectPing
 	ack
+	joining
 )
 
 type pingReq struct {
@@ -43,7 +45,7 @@ type ackResp struct {
 	ReqNo uint32
 }
 
-// Packet represents the incoming packet and the peer's associated
+// Packet represents the incoming packetCh and the peer's associated
 // data including the message payload.
 type Packet struct {
 	// Buf is the raw content of the payload.
@@ -61,29 +63,36 @@ type Transport interface {
 	// a response is not guaranteed when the method returns.
 	SendTo(b []byte, addr string) error
 
+	// DialAndConnect will create a connection to another peer allowing for a
+	// direct two-way connection between both peers.
+	DialAndConnect(addr string, timeout time.Duration) (net.Conn, error)
+
 	// Packets returns a channel that is used to receive incoming packets
 	// from other peers.
 	Packets() <-chan *Packet
+
+	// Stream returns a read only channel that is used to receive incoming
+	// streamCh connections from other peers. A streamCh is usually sent during
+	// attempts at syncing state between two peers.
+	Stream() <- chan net.Conn
 
 	// Shutdown allows for the transport to clean up all listeners safely.
 	Shutdown() error
 }
 
 type NetTransport struct {
-	udpCon   *net.UDPConn
-	packet   chan *Packet
+	udpCon *net.UDPConn
+	tcpLsn *net.TCPListener
+
+	packetCh chan *Packet
+	streamCh chan net.Conn
 	shutdown chan struct{}
 }
 
 func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
-	udpAddr := &net.UDPAddr{
-		Port: int(port),
-		IP:   net.ParseIP(addr),
-	}
-
 	var ok bool
 	t := &NetTransport{
-		packet:   make(chan *Packet),
+		packetCh: make(chan *Packet),
 		shutdown: make(chan struct{}),
 	}
 	defer func() {
@@ -92,13 +101,22 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 		}
 	}()
 
+	udpAddr := &net.UDPAddr{Port: int(port), IP:   net.ParseIP(addr)}
 	udpCon, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start UDP connection on address %v Port %v: %v", addr, port, err)
 	}
 	t.udpCon = udpCon
 
+	tcpAddr := &net.TCPAddr{Port: int(port), IP: net.ParseIP(addr)}
+	tcpCon, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return nil, err
+	}
+	t.tcpLsn = tcpCon
+
 	go t.listenForPacket()
+	go t.listenForStream()
 	return t, nil
 }
 
@@ -114,16 +132,31 @@ func (n *NetTransport) SendTo(b []byte, addr string) error {
 	return nil
 }
 
+func (n *NetTransport) DialAndConnect(addr string, timeout time.Duration) (net.Conn, error) {
+	d := &net.Dialer{Timeout: timeout}
+	conn, err := d.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
 func (n *NetTransport) Packets() <-chan *Packet {
-	return n.packet
+	return n.packetCh
+}
+
+func (n *NetTransport) Stream() <- chan net.Conn {
+	return n.streamCh
 }
 
 func (n *NetTransport) Shutdown() error {
 	close(n.shutdown)
-	close(n.packet)
+	close(n.packetCh)
 	return n.udpCon.Close()
 }
 
+// listenForPacket will wait for a UDP packet sent to the connection and
+// will format it into a Packet and forward it to the packet channel to be handled.
 func (n *NetTransport) listenForPacket() {
 	for {
 		var b []byte
@@ -131,21 +164,40 @@ func (n *NetTransport) listenForPacket() {
 		if err != nil {
 			select {
 			case <-n.shutdown:
-				break
+				return
 			default:
-				log.Printf("[ERROR] Failed to read received UDP packet: %v", err)
+				log.Printf("[ERROR] Failed to read received UDP packetCh: %v", err)
 				continue
 			}
 		}
 
 		if len(b) <= 1 {
-			log.Printf("[ERROR] Byte packet is too short (%v), must be longer.", len(b))
+			log.Printf("[ERROR] Byte packetCh is too short (%v), must be longer.", len(b))
 			continue
 		}
 
-		n.packet <- &Packet{
+		n.packetCh <- &Packet{
 			From: addr,
 			Buf:  b,
 		}
+	}
+}
+
+// listenForStream will listen for attempts of creating a TCP connection and if
+// successful, will forward the new connection through towards the stream.
+func (n *NetTransport) listenForStream() {
+	for {
+		conn, err := n.tcpLsn.AcceptTCP()
+		if err != nil {
+			select {
+			case <-n.shutdown:
+				return
+			default:
+				log.Printf("[ERROR] Failed to accept TCP connection: %v", err)
+				continue
+			}
+		}
+
+		n.streamCh <- conn
 	}
 }
