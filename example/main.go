@@ -3,12 +3,13 @@ package main
 import (
 	"github.com/Mathew-Estafanous/memlist"
 	"log"
+	"time"
 )
 
 func main() {
 	conf1 := memlist.DefaultLocalConfig()
 	conf1.Name = "MEMBER ONE"
-	mem1, err := memlist.Create(conf1)
+	_, err := memlist.Create(conf1)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -20,13 +21,26 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-
 	if err = mem2.Join(":7990"); err != nil {
 		log.Fatalln(err)
 	}
 
+	conf3 := memlist.DefaultLocalConfig()
+	conf3.Name = "MEMBER THREE"
+	conf3.BindPort = 7950
+	mem3, err := memlist.Create(conf3)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err = mem3.Join(":7990"); err != nil {
+		log.Fatalln(err)
+	}
+
 	stop := make(chan bool)
-	log.Printf("Member 1: %v", mem1.AllNodes())
-	log.Printf("Member 2: %v", mem2.AllNodes())
+	time.Sleep(10 * time.Second)
+	log.Println("Shutting down Member 2")
+	if err = mem2.Shutdown(); err != nil {
+		log.Fatalln(err)
+	}
 	<- stop
 }

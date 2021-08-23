@@ -44,7 +44,7 @@ func DefaultLocalConfig() *Config {
 	host, _ := os.Hostname()
 	return &Config{
 		Name:           host,
-		BindAddr:       "",
+		BindAddr:       "127.0.0.1",
 		BindPort:       7990,
 		ProbeTimeout:   200 * time.Millisecond,
 		ProbeInterval:  1 * time.Second,

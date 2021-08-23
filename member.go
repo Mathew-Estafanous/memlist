@@ -30,6 +30,10 @@ type Node struct {
 	State StateType
 }
 
+func (n *Node) String() string {
+	return fmt.Sprintf("[%s | %s]", n.Name, n.Addr)
+}
+
 type handler func(a ackResp, from net.Addr)
 
 type Member struct {
@@ -71,12 +75,12 @@ func Create(conf *Config) (*Member, error) {
 
 	l := log.New(os.Stdout, "", log.LstdFlags)
 	m := &Member{
-		conf:       conf,
-		transport:  transport,
-		nodeMap:    make(map[string]*Node),
+		conf:        conf,
+		transport:   transport,
+		nodeMap:     make(map[string]*Node),
 		ackHandlers: make(map[uint32]handler),
-		shutdownCh: make(chan struct{}),
-		logger:     l,
+		shutdownCh:  make(chan struct{}),
+		logger:      l,
 	}
 
 	go m.packetListen()
@@ -99,9 +103,9 @@ func (m *Member) Join(addr string) error {
 	}
 
 	n := Node{
-		Name: m.conf.Name,
-		Addr: m.conf.BindAddr,
-		Port: m.conf.BindPort,
+		Name:  m.conf.Name,
+		Addr:  m.conf.BindAddr,
+		Port:  m.conf.BindPort,
 		State: Alive,
 	}
 	if _, err = conn.Write(encodeMessage(joinSync, &n)); err != nil {
@@ -118,7 +122,8 @@ func (m *Member) Join(addr string) error {
 
 	m.nodeMu.Lock()
 	for k, v := range peerState {
-		m.nodeMap[k] = &v
+		n := v
+		m.nodeMap[k] = &n
 	}
 	m.numNodes = uint32(len(peerState))
 	m.nodeMu.Unlock()
@@ -241,7 +246,7 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 }
 
-func (m *Member) handleIndirectPing(dec *gob.Decoder, from net.Addr) {
+func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 	var ind indirectPingReq
 	if err := dec.Decode(&ind); err != nil {
 		log.Printf("[ERROR] Failed to decode byte slice into IndirectPingReq. %v", err)
@@ -372,6 +377,7 @@ func (m *Member) sendProbe() {
 	// Wait for "ack" response until timeout. In which we switch making an indirect probe.
 	select {
 	case <-time.After(m.conf.ProbeTimeout):
+		m.logger.Printf("[INFO] Sending indirect probe to %v.", sendNode.Name)
 		m.sendIndirectProbe(sendNode)
 	case <-responded:
 		sendNode.State = Alive
@@ -406,9 +412,9 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			FromAddr: m.conf.BindAddr,
 		}
 		b := encodeMessage(indirectPing, indPing)
-		addr := net.JoinHostPort(m.conf.BindAddr, strconv.Itoa(int(m.conf.BindPort)))
+		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
-			log.Printf("[ERROR] Failed to send initial ping to Node %v: %v", n.Name, err)
+			log.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
 		}
 
 		h := func(a ackResp, from net.Addr) {
@@ -432,9 +438,6 @@ func (m *Member) sendIndirectProbe(send *Node) {
 }
 
 func (m *Member) handleConn(conn net.Conn) {
-	//b := []byte{3, 55, 255, 129, 3, 1, 1, 4, 78, 111, 100, 101, 1, 255, 130, 0, 1, 4, 1, 4, 78, 97, 109, 101, 1, 12,
-	//	0, 1, 4, 65, 100, 100, 114, 1, 12, 0, 1, 4, 80, 111, 114, 116, 1, 6, 0, 1, 5, 83, 116, 97, 116, 101, 1, 4, 0, 0,
-	//	0, 19, 255, 130, 1, 10, 77, 69, 77, 66, 69, 82, 32, 84, 87, 79, 2, 254, 31, 34, 0, 10}
 	msgT := make([]byte, 1)
 	if _, err := io.ReadAtLeast(conn, msgT, 1); err != nil {
 		m.logger.Printf("[ERROR] Failed to read from connection: %v", err)
