@@ -37,9 +37,14 @@ func main() {
 	}
 
 	stop := make(chan bool)
-	time.Sleep(10 * time.Second)
+	time.Sleep(3 * time.Second)
 	log.Println("Shutting down Member 2")
 	if err = mem2.Shutdown(); err != nil {
+		log.Fatalln(err)
+	}
+
+	time.Sleep(3 * time.Second)
+	if err = mem3.Shutdown(); err != nil {
 		log.Fatalln(err)
 	}
 	<- stop

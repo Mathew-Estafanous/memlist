@@ -336,18 +336,23 @@ func (m *Member) runSchedule() {
 }
 
 func (m *Member) sendProbe() {
-	if m.numNodes == 0 {
-		return
-	}
-
-	// arbitrarily select a peer Node from the map.
+	// arbitrarily select a peer Node from the map, ensuring that
+	// the chosen peer is alive.
 	var key string
 	m.nodeMu.Lock()
-	for k := range m.nodeMap {
+	for k, n := range m.nodeMap {
+		if n.State == Dead {
+			continue
+		}
 		key = k
 		break
 	}
-	sendNode := m.nodeMap[key]
+	sendNode, ok := m.nodeMap[key]
+	if !ok {
+		m.logger.Println("[INFO] There are no known alive nodes to send a probe to.")
+		m.nodeMu.Unlock()
+		return
+	}
 	m.nodeMu.Unlock()
 
 	// Make ping/probe request and send it to the selected Node.
