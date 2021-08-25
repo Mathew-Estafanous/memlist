@@ -173,10 +173,14 @@ func (m *Member) Leave() error {
 	return nil
 }
 
+// nextReqNum increments the request number in a thread safe manner, returning
+// the resulting number after incrementing.
 func (m *Member) nextReqNum() uint32 {
 	return atomic.AddUint32(&m.requestNumber, 1)
 }
 
+// packetListen listens for packets sent from the Transport layer and hands it
+// down to be properly handled.
 func (m *Member) packetListen() {
 	for {
 		select {
@@ -188,6 +192,8 @@ func (m *Member) packetListen() {
 	}
 }
 
+// streamListen listens for an attempted stream connection sent by the Transport,
+// sending the given connection to be properly handled.
 func (m *Member) streamListen() {
 	for {
 		select {
@@ -437,11 +443,15 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		return
 	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
 		log.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
-		// TODO: Remove node from internal member list into a different list of dead members.
 		send.State = Dead
+		m.nodeMu.Lock()
+		m.numNodes--
+		m.nodeMu.Unlock()
 	}
 }
 
+// handleConn will use the provided connection and do the appropriate operations
+// depending on the message type.
 func (m *Member) handleConn(conn net.Conn) {
 	msgT := make([]byte, 1)
 	if _, err := io.ReadAtLeast(conn, msgT, 1); err != nil {
@@ -473,6 +483,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			return
 		}
 
+		// add the new peer that has joined the cluster to own map.
 		m.nodeMap[joiningPeer.Name] = joiningPeer
 		m.numNodes++
 		m.nodeMu.Unlock()
@@ -482,6 +493,8 @@ func (m *Member) handleConn(conn net.Conn) {
 	}
 }
 
+// encodeMessage will encode the provided type into a byte slice and appends the
+// message type to the front of the byte slice.
 func encodeMessage(tp messageType, e interface{}) []byte {
 	buf := bytes.NewBuffer([]byte{uint8(tp)})
 	enc := gob.NewEncoder(buf)
