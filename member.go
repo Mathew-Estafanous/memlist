@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -45,9 +46,11 @@ type Member struct {
 	ackMu       sync.Mutex
 	ackHandlers map[uint32]handler
 
-	nodeMu   sync.Mutex
-	nodeMap  map[string]*Node
-	numNodes uint32
+	nodeMu     sync.Mutex
+	nodeMap    map[string]*Node
+	aliveNodes uint32
+	probeList  []string
+	probeIdx   int
 
 	shutdownCh chan struct{}
 	hasStopped bool
@@ -78,6 +81,7 @@ func Create(conf *Config) (*Member, error) {
 		conf:        conf,
 		transport:   transport,
 		nodeMap:     make(map[string]*Node),
+		probeList:   make([]string, 0),
 		ackHandlers: make(map[uint32]handler),
 		shutdownCh:  make(chan struct{}),
 		logger:      l,
@@ -120,13 +124,10 @@ func (m *Member) Join(addr string) error {
 		return fmt.Errorf("failed to sync with peer: %v", err)
 	}
 
-	m.nodeMu.Lock()
-	for k, v := range peerState {
+	for _, v := range peerState {
 		n := v
-		m.nodeMap[k] = &n
+		m.addNewNode(&n)
 	}
-	m.numNodes = uint32(len(peerState))
-	m.nodeMu.Unlock()
 
 	m.logger.Printf("[CHANGE] Successfully joined the cluster")
 	return nil
@@ -342,23 +343,20 @@ func (m *Member) runSchedule() {
 }
 
 func (m *Member) sendProbe() {
-	// arbitrarily select a peer Node from the map, ensuring that
-	// the chosen peer is alive.
-	var key string
 	m.nodeMu.Lock()
-	for k, n := range m.nodeMap {
-		if n.State == Dead {
-			continue
-		}
-		key = k
-		break
-	}
-	sendNode, ok := m.nodeMap[key]
-	if !ok {
+	if m.aliveNodes == 0 {
 		m.logger.Println("[INFO] There are no known alive nodes to send a probe to.")
-		m.nodeMu.Unlock()
 		return
 	}
+
+	// get the next peer to send probe to, depending on the list. Ensuring every peer is
+	// sent a probe periodically, guaranteeing that all peers will be reached at some point.
+	if m.probeIdx >= len(m.probeList) {
+		m.probeIdx = 0
+	}
+	name := m.probeList[m.probeIdx]
+	sendNode := m.nodeMap[name]
+	m.probeIdx++
 	m.nodeMu.Unlock()
 
 	// Make ping/probe request and send it to the selected Node.
@@ -445,7 +443,14 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		log.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
 		send.State = Dead
 		m.nodeMu.Lock()
-		m.numNodes--
+		m.aliveNodes--
+		// node should no longer be part of the probe list since it is considered dead.
+		for i, v := range m.probeList {
+			if v == send.Name {
+				m.probeList = remove(m.probeList, i)
+				break
+			}
+		}
 		m.nodeMu.Unlock()
 	}
 }
@@ -482,15 +487,41 @@ func (m *Member) handleConn(conn net.Conn) {
 			m.logger.Printf("[ERROR] Failed to send response with current state: %v", err)
 			return
 		}
+		m.nodeMu.Unlock()
 
 		// add the new peer that has joined the cluster to own map.
-		m.nodeMap[joiningPeer.Name] = joiningPeer
-		m.numNodes++
-		m.nodeMu.Unlock()
+		m.addNewNode(joiningPeer)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
 		return
 	}
+}
+
+func (m *Member) addNewNode(n *Node) {
+	m.nodeMu.Lock()
+	defer m.nodeMu.Unlock()
+	m.nodeMap[n.Name] = n
+	m.aliveNodes++
+
+	if len(m.probeList) == 0 {
+		m.probeList = insert(m.probeList, 0, n.Name)
+	} else {
+		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
+	}
+}
+
+func remove(s []string, i int) []string {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
+func insert(a []string, index int, value string) []string {
+	if len(a) == index { // nil or empty slice or after last element
+		return append(a, value)
+	}
+	a = append(a[:index+1], a[index:]...) // index < len(a)
+	a[index] = value
+	return a
 }
 
 // encodeMessage will encode the provided type into a byte slice and appends the
