@@ -221,7 +221,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	case ack:
 		m.handleAck(dec, from)
 	default:
-		m.logger.Println("[ERROR] Invalid message type (%v) is not available.")
+		m.logger.Printf("[ERROR] Invalid message type (%v) is not available.", b[0])
 		return
 	}
 }
@@ -234,7 +234,7 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	if p.Node != m.conf.Name {
-		m.logger.Println("[WARNING] Received an unexpected sendProbe for Node. %s ")
+		m.logger.Printf("[WARNING] Received an unexpected sendProbe for Node: %s", p.Node)
 		return
 	}
 

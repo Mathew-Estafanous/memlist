@@ -37,41 +37,57 @@ type GossipEvent struct {
 
 func (g *GossipEvent) Less(i btree.Item) bool {
 	o := i.(*GossipEvent)
-	if g.transmit <= o.transmit {
+	if g.transmit < o.transmit {
 		return true
+	} else if g.transmit > o.transmit {
+		return false
 	}
-	return false
+
+	if g.gossip.invalidates(o.gossip) {
+		return false
+	}
+	return true
 }
 
 type GossipEventQueue struct {
-	numNodes  func() int
+	numNodes func() int
 
 	mu sync.Mutex
 	// used as a queue that prioritize the newest events.
 	bt *btree.BTree
 }
 
-func (q *GossipEventQueue) addGossip(g Gossip) {
+func (q *GossipEventQueue) Queue(g Gossip) {
 	ge := &GossipEvent{
-		gossip: g,
+		gossip:   g,
 		transmit: 0,
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	override := make([]*GossipEvent, 0)
+	var remove []*GossipEvent
 	q.bt.Ascend(func(i btree.Item) bool {
 		o := i.(*GossipEvent)
 		if o.gossip.invalidates(ge.gossip) {
-			override = append(override, o)
+			remove = append(remove, o)
 			return false
 		}
 		return true
 	})
 
-	for _, e := range override {
+	for _, e := range remove {
 		_ = q.bt.Delete(e)
 	}
 	_ = q.bt.ReplaceOrInsert(ge)
+}
+
+func (q *GossipEventQueue) orderedView() []*GossipEvent {
+	gossipQueue := make([]*GossipEvent, 0)
+	q.bt.Descend(func(i btree.Item) bool {
+		o := i.(*GossipEvent)
+		gossipQueue = append(gossipQueue, o)
+		return true
+	})
+	return gossipQueue
 }
 
 func (q *GossipEventQueue) getGossips(limit int) ([]byte, error) {
