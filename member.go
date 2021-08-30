@@ -133,7 +133,7 @@ func (m *Member) Join(addr string) error {
 	return nil
 }
 
-// AllNodes will return every known Alive node at the time.
+// AllNodes will return every known alive node at the time.
 func (m *Member) AllNodes() []Node {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
