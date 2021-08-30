@@ -46,7 +46,7 @@ func (g *GossipEvent) Less(i btree.Item) bool {
 	if g.Gossip.invalidates(o.Gossip) {
 		return false
 	}
-	return true
+	return g.Gossip.Node.Name < o.Gossip.Node.Name
 }
 
 type GossipEventQueue struct {

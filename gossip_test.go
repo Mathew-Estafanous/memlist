@@ -18,9 +18,10 @@ func newGossipEventQueue() *GossipEventQueue {
 }
 
 func TestGossipEventQueue_Queue(t *testing.T) {
-	gossips := [2]Gossip{
-		{Gt: join, Node: Node{Name: "One"}},
-		{Gt: join, Node: Node{Name: "Two"}}}
+	gossips := [3]Gossip{
+		{Gt: join, Node: Node{Name: "Two"}},
+		{Gt: dead, Node: Node{Name: "Three"}},
+		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
 		eventQue.Queue(g)
@@ -34,12 +35,13 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 		}
 	}
 
-	invalidate := Gossip{Gt: dead, Node: Node{Name: "Two"}}
+	invalidate := Gossip{Gt: dead, Node: Node{Name: "One"}}
 	eventQue.Queue(invalidate)
 
-	expected := [2]Gossip{
-		{Gt: dead, Node: Node{Name: "Two"}},
-		{Gt: join, Node: Node{Name: "One"}}}
+	expected := [3]Gossip{
+		{Gt: join, Node: Node{Name: "Two"}},
+		{Gt: dead, Node: Node{Name: "Three"}},
+		{Gt: dead, Node: Node{Name: "One"}}}
 	queue = eventQue.orderedView()
 	if len(queue) != len(expected) {
 		t.Fatalf("Queue length %v does not match expected length %v.", len(queue), len(expected))
@@ -47,18 +49,17 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 
 	for i := range queue {
 		otherName := queue[i].Gossip.Node.Name
-		if otherName != gossips[i].Node.Name {
-			t.Fatalf("Gossip %v is not equal to %v", queue[i].Gossip, gossips[i])
+		if otherName != expected[i].Node.Name {
+			t.Fatalf("Gossip %v is not equal to %v", queue[i].Gossip, expected[i])
 		}
 	}
 }
 
 func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 	gossips := [3]Gossip{
-		{Gt: join, Node: Node{Name: "One"}},
 		{Gt: join, Node: Node{Name: "Two"}},
 		{Gt: dead, Node: Node{Name: "Three"}},
-	}
+		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
 		eventQue.Queue(g)
@@ -80,7 +81,7 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 	}
 
 	if !bytes.Equal(resultBuf, expectedBuf.Bytes()) {
- 		t.Fatal("Result byte slice does not match expected.")
+		t.Fatal("Result byte slice does not match expected.")
 	}
 
 	result := eventQue.orderedView()
