@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"github.com/google/btree"
 	"io"
 	"log"
 	"math/rand"
@@ -42,6 +43,7 @@ type Member struct {
 
 	conf      *Config
 	transport Transport
+	eventQueue *GossipEventQueue
 
 	ackMu       sync.Mutex
 	ackHandlers map[uint32]handler
@@ -85,6 +87,11 @@ func Create(conf *Config) (*Member, error) {
 		ackHandlers: make(map[uint32]handler),
 		shutdownCh:  make(chan struct{}),
 		logger:      l,
+	}
+
+	m.eventQueue = &GossipEventQueue{
+		numNodes: m.TotalNodes,
+		bt: btree.New(2),
 	}
 
 	go m.packetListen()
@@ -144,6 +151,13 @@ func (m *Member) AllNodes() []Node {
 		}
 	}
 	return nodes
+}
+
+// TotalNodes returns the total number of known peers that are alive.
+func (m *Member) TotalNodes() int {
+	m.nodeMu.Lock()
+	m.nodeMu.Unlock()
+	return int(m.aliveNodes)
 }
 
 // Shutdown will stop all background processes such as responded to received
@@ -508,6 +522,13 @@ func (m *Member) addNewNode(n *Node) {
 	} else {
 		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
 	}
+
+	// create a new gossip that then is added to the event queue to be disseminated.
+	gossip := Gossip{
+		Gt: join,
+		Node: *n,
+	}
+	m.eventQueue.Queue(gossip)
 }
 
 func remove(s []string, i int) []string {
