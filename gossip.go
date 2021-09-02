@@ -12,8 +12,11 @@ type gossipType uint8
 
 const (
 	join gossipType = iota
+	leave
 	dead
 )
+
+const gossipLimit = 3
 
 // Gossip represents a message that is sent to peers regarding changes
 // in the state of the cluster and other nodes.

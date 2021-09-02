@@ -1,6 +1,7 @@
 package memlist
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/gob"
 	"fmt"
@@ -23,6 +24,8 @@ const (
 	Dead
 )
 
+const packetDelim = '$'
+
 // Node represents a single node within the cluster and their
 // state within the cluster.
 type Node struct {
@@ -41,8 +44,8 @@ type handler func(a ackResp, from net.Addr)
 type Member struct {
 	requestNumber uint32
 
-	conf      *Config
-	transport Transport
+	conf       *Config
+	transport  Transport
 	eventQueue *GossipEventQueue
 
 	ackMu       sync.Mutex
@@ -78,7 +81,7 @@ func Create(conf *Config) (*Member, error) {
 		transport = t
 	}
 
-	l := log.New(os.Stdout, "", log.LstdFlags)
+	l := log.New(os.Stdout, fmt.Sprintf("[%v] ", conf.Name), log.LstdFlags)
 	m := &Member{
 		conf:        conf,
 		transport:   transport,
@@ -91,7 +94,7 @@ func Create(conf *Config) (*Member, error) {
 
 	m.eventQueue = &GossipEventQueue{
 		numNodes: m.TotalNodes,
-		bt: btree.New(2),
+		bt:       btree.New(2),
 	}
 
 	go m.packetListen()
@@ -134,6 +137,13 @@ func (m *Member) Join(addr string) error {
 	for _, v := range peerState {
 		n := v
 		m.addNewNode(&n)
+
+		// create a new gossip that then is added to the event queue to be disseminated.
+		gossip := Gossip{
+			Gt:   join,
+			Node: n,
+		}
+		m.eventQueue.Queue(gossip)
 	}
 
 	m.logger.Printf("[CHANGE] Successfully joined the cluster")
@@ -221,13 +231,20 @@ func (m *Member) streamListen() {
 }
 
 func (m *Member) handlePacket(b []byte, from net.Addr) {
+	reader := bufio.NewReader(bytes.NewReader(b))
+	msgB, err := reader.ReadBytes(packetDelim)
+	if err != nil {
+		m.logger.Println("[ERROR] Failed to read the message until ending delim (%v): %v", packetDelim, err)
+		return
+	}
+
 	if len(b) <= 1 {
 		m.logger.Println("[ERROR] Missing message type in payload.")
 		return
 	}
 
-	dec := gob.NewDecoder(bytes.NewReader(b[1:]))
-	switch messageType(b[0]) {
+	dec := gob.NewDecoder(bytes.NewReader(msgB[1:len(msgB)-1]))
+	switch messageType(msgB[0]) {
 	case ping:
 		m.handlePing(dec, from)
 	case indirectPing:
@@ -235,9 +252,16 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	case ack:
 		m.handleAck(dec, from)
 	default:
-		m.logger.Printf("[ERROR] Invalid message type (%v) is not available.", b[0])
+		m.logger.Printf("[ERROR] Invalid message type (%v) is not available.", msgB[0])
 		return
 	}
+
+	gossipB, err := io.ReadAll(reader)
+	if err != nil && err != io.EOF {
+		m.logger.Printf("[ERROR] Failed to read gossip bytes from packet: %v", err)
+		return
+	}
+	m.handleGossips(gossipB)
 }
 
 func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
@@ -381,6 +405,13 @@ func (m *Member) sendProbe() {
 		FromAddr: m.conf.BindAddr,
 	}
 	b := encodeMessage(ping, p)
+	gbuf, err := m.eventQueue.GetGossipEvents(gossipLimit)
+	if err != nil {
+		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
+	} else {
+		b = append(b, gbuf...)
+	}
+
 	addr := net.JoinHostPort(sendNode.Addr, strconv.Itoa(int(sendNode.Port)))
 	if err := m.transport.SendTo(b, addr); err != nil {
 		log.Printf("[ERROR] Failed to send initial ping to Node %v: %v", sendNode.Name, err)
@@ -522,13 +553,15 @@ func (m *Member) addNewNode(n *Node) {
 	} else {
 		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
 	}
+}
 
-	// create a new gossip that then is added to the event queue to be disseminated.
-	gossip := Gossip{
-		Gt: join,
-		Node: *n,
+func (m *Member) handleGossips(b []byte) {
+	gossipEvents := make([]*GossipEvent, 0)
+	dec := gob.NewDecoder(bytes.NewReader(b))
+	if err := dec.Decode(&gossipEvents); err != nil && err != io.EOF {
+		m.logger.Printf("[ERROR] Failed to parse gossip events: %v", err)
+		return
 	}
-	m.eventQueue.Queue(gossip)
 }
 
 func remove(s []string, i int) []string {
@@ -551,5 +584,6 @@ func encodeMessage(tp messageType, e interface{}) []byte {
 	buf := bytes.NewBuffer([]byte{uint8(tp)})
 	enc := gob.NewEncoder(buf)
 	enc.Encode(e)
+	buf.Write([]byte{packetDelim})
 	return buf.Bytes()
 }
