@@ -278,6 +278,7 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 
 	ackR := ackResp{ReqNo: p.ReqNo}
 	b := encodeMessage(ack, &ackR)
+	b = m.piggyBackGossip(b)
 	var addr string
 	if p.FromPort > 0 && p.FromAddr != "" {
 		addr = net.JoinHostPort(p.FromAddr, strconv.Itoa(int(p.FromPort)))
@@ -313,6 +314,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 		}
 		ackR := ackResp{ReqNo: ind.ReqNo}
 		b := encodeMessage(ack, &ackR)
+		b = m.piggyBackGossip(b)
 
 		var addr string
 		if ind.FromPort > 0 && ind.FromAddr != "" {
@@ -329,6 +331,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 	m.addAckHandler(ackRespHandler, p.ReqNo, m.conf.ProbeTimeout)
 
 	b := encodeMessage(ping, &p)
+	b = m.piggyBackGossip(b)
 	var addr string
 	addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
 	if err := m.transport.SendTo(b, addr); err != nil {
@@ -405,12 +408,7 @@ func (m *Member) sendProbe() {
 		FromAddr: m.conf.BindAddr,
 	}
 	b := encodeMessage(ping, p)
-	gbuf, err := m.eventQueue.GetGossipEvents(gossipLimit)
-	if err != nil {
-		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
-	} else {
-		b = append(b, gbuf...)
-	}
+	b = m.piggyBackGossip(b)
 
 	addr := net.JoinHostPort(sendNode.Addr, strconv.Itoa(int(sendNode.Port)))
 	if err := m.transport.SendTo(b, addr); err != nil {
@@ -466,6 +464,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			FromAddr: m.conf.BindAddr,
 		}
 		b := encodeMessage(indirectPing, indPing)
+		b = m.piggyBackGossip(b)
 		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
 			log.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
@@ -558,11 +557,30 @@ func (m *Member) addNewNode(n *Node) {
 func (m *Member) handleGossips(b []byte) {
 	gossipEvents := make([]*GossipEvent, 0)
 	dec := gob.NewDecoder(bytes.NewReader(b))
-	if err := dec.Decode(&gossipEvents); err != nil && err != io.EOF {
+	if err := dec.Decode(&gossipEvents); err != nil {
 		m.logger.Printf("[ERROR] Failed to parse gossip events: %v", err)
 		return
 	}
 
+	for _, g := range gossipEvents {
+		switch g.Gossip.Gt {
+		case join:
+
+		case leave:
+
+		case dead:
+		}
+	}
+}
+
+func (m *Member) piggyBackGossip(b []byte) []byte {
+	gbuf, err := m.eventQueue.GetGossipEvents(gossipLimit)
+	if err != nil {
+		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
+	} else {
+		b = append(b, gbuf...)
+	}
+	return b
 }
 
 func remove(s []string, i int) []string {

@@ -124,6 +124,6 @@ func (q *GossipEventQueue) orderedView() []*GossipEvent {
 }
 
 func calcTransmitLimit(totalNodes int) int {
-	limit := math.Ceil(math.Log10(float64(totalNodes)))
+	limit := math.Ceil(math.Log10(float64(totalNodes + 1)))
 	return int(limit)
 }
