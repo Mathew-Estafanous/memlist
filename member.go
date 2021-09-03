@@ -234,7 +234,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	reader := bufio.NewReader(bytes.NewReader(b))
 	msgB, err := reader.ReadBytes(packetDelim)
 	if err != nil {
-		m.logger.Println("[ERROR] Failed to read the message until ending delim (%v): %v", packetDelim, err)
+		m.logger.Printf("[ERROR] Failed to read the message until ending delim (%v): %v", packetDelim, err)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 		return
 	}
 
-	dec := gob.NewDecoder(bytes.NewReader(msgB[1:len(msgB)-1]))
+	dec := gob.NewDecoder(bytes.NewReader(msgB[1 : len(msgB)-1]))
 	switch messageType(msgB[0]) {
 	case ping:
 		m.handlePing(dec, from)
@@ -562,6 +562,7 @@ func (m *Member) handleGossips(b []byte) {
 		m.logger.Printf("[ERROR] Failed to parse gossip events: %v", err)
 		return
 	}
+
 }
 
 func remove(s []string, i int) []string {

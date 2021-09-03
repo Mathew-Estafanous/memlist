@@ -83,16 +83,6 @@ func (q *GossipEventQueue) Queue(g Gossip) {
 	_ = q.bt.ReplaceOrInsert(ge)
 }
 
-func (q *GossipEventQueue) orderedView() []*GossipEvent {
-	gossipQueue := make([]*GossipEvent, 0)
-	q.bt.Descend(func(i btree.Item) bool {
-		o := i.(*GossipEvent)
-		gossipQueue = append(gossipQueue, o)
-		return true
-	})
-	return gossipQueue
-}
-
 func (q *GossipEventQueue) GetGossipEvents(limit int) ([]byte, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -121,6 +111,16 @@ func (q *GossipEventQueue) GetGossipEvents(limit int) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (q *GossipEventQueue) orderedView() []*GossipEvent {
+	gossipQueue := make([]*GossipEvent, 0)
+	q.bt.Descend(func(i btree.Item) bool {
+		o := i.(*GossipEvent)
+		gossipQueue = append(gossipQueue, o)
+		return true
+	})
+	return gossipQueue
 }
 
 func calcTransmitLimit(totalNodes int) int {
