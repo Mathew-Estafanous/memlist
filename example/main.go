@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/Mathew-Estafanous/memlist"
 	"log"
+	"time"
 )
 
 func main() {
@@ -36,10 +37,10 @@ func main() {
 	}
 
 	stop := make(chan bool)
-	//time.Sleep(3 * time.Second)
-	//log.Println("Shutting down Member 2")
-	//if err = mem2.Shutdown(); err != nil {
-	//	log.Fatalln(err)
-	//}
+	time.Sleep(3 * time.Second)
+	log.Println("Shutting down Member 2")
+	if err = mem2.Shutdown(); err != nil {
+		log.Fatalln(err)
+	}
 	<- stop
 }

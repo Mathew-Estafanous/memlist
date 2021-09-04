@@ -143,7 +143,7 @@ func (m *Member) Join(addr string) error {
 			Gt:   join,
 			Node: n,
 		}
-		m.eventQueue.Queue(gossip)
+		m.eventQueue.Queue(gossip, 0)
 	}
 
 	m.logger.Printf("[CHANGE] Successfully joined the cluster")
@@ -306,7 +306,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 		FromPort: m.conf.BindPort,
 	}
 
-	// Setup an ack handler to route the ack response back to Node that sent the indirect sendProbe request.
+	// Set up an ack handler to route the ack response back to Node that sent the indirect sendProbe request.
 	ackRespHandler := func(a ackResp, from net.Addr) {
 		if a.ReqNo != p.ReqNo {
 			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.ReqNo, p.ReqNo)
@@ -550,6 +550,7 @@ func (m *Member) addNewNode(n *Node) {
 	if len(m.probeList) == 0 {
 		m.probeList = insert(m.probeList, 0, n.Name)
 	} else {
+		// randomly insert new node into probe list.
 		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
 	}
 }
@@ -562,6 +563,7 @@ func (m *Member) handleGossips(b []byte) {
 		return
 	}
 
+	// handle the gossip event depending on the type of event it is.
 	for _, g := range gossipEvents {
 		switch g.Gossip.Gt {
 		case join:
@@ -573,6 +575,8 @@ func (m *Member) handleGossips(b []byte) {
 	}
 }
 
+// piggyBackGossip will append a byte slice containing data regarding the
+// gossip events in the queue and return the resulting complete slice.
 func (m *Member) piggyBackGossip(b []byte) []byte {
 	gbuf, err := m.eventQueue.GetGossipEvents(gossipLimit)
 	if err != nil {
