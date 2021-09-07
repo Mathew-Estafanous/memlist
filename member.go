@@ -137,13 +137,6 @@ func (m *Member) Join(addr string) error {
 	for _, v := range peerState {
 		n := v
 		m.addNewNode(&n)
-
-		// create a new gossip that then is added to the event queue to be disseminated.
-		gossip := Gossip{
-			Gt:   join,
-			Node: n,
-		}
-		m.eventQueue.Queue(gossip, 0)
 	}
 
 	m.logger.Printf("[CHANGE] Successfully joined the cluster")
@@ -484,18 +477,13 @@ func (m *Member) sendIndirectProbe(send *Node) {
 	case <-responded:
 		return
 	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
-		log.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
-		send.State = Dead
-		m.nodeMu.Lock()
-		m.aliveNodes--
-		// node should no longer be part of the probe list since it is considered dead.
-		for i, v := range m.probeList {
-			if v == send.Name {
-				m.probeList = remove(m.probeList, i)
-				break
-			}
+		m.logger.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
+		m.removeNode(send)
+		deadGossip := Gossip{
+			Gt: dead,
+			Node: *send,
 		}
-		m.nodeMu.Unlock()
+		m.eventQueue.Queue(deadGossip, 0)
 	}
 }
 
@@ -535,6 +523,13 @@ func (m *Member) handleConn(conn net.Conn) {
 
 		// add the new peer that has joined the cluster to own map.
 		m.addNewNode(joiningPeer)
+
+		// create a new gossip that then is added to the event queue to be disseminated.
+		gossip := Gossip{
+			Gt:   join,
+			Node: *joiningPeer,
+		}
+		m.eventQueue.Queue(gossip, 0)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
 		return
@@ -555,6 +550,20 @@ func (m *Member) addNewNode(n *Node) {
 	}
 }
 
+func (m *Member) removeNode(n *Node) {
+	n.State = Dead
+	m.nodeMu.Lock()
+	m.aliveNodes--
+	// node should no longer be part of the probe list since it is considered dead.
+	for i, v := range m.probeList {
+		if v == n.Name {
+			m.probeList = remove(m.probeList, i)
+			break
+		}
+	}
+	m.nodeMu.Unlock()
+}
+
 func (m *Member) handleGossips(b []byte) {
 	gossipEvents := make([]*GossipEvent, 0)
 	dec := gob.NewDecoder(bytes.NewReader(b))
@@ -565,13 +574,23 @@ func (m *Member) handleGossips(b []byte) {
 
 	// handle the gossip event depending on the type of event it is.
 	for _, g := range gossipEvents {
+		if g.Gossip.Node.Name == m.conf.Name {
+			// TODO: Handle gossips that refer to self.
+			continue
+		}
+
+		// TODO: Handle leaving node differently from dead node.
 		switch g.Gossip.Gt {
 		case join:
-
+			m.addNewNode(&g.Gossip.Node)
+			m.logger.Printf("Joining: %v", g)
 		case leave:
-
+			m.removeNode(&g.Gossip.Node)
 		case dead:
+			m.removeNode(&g.Gossip.Node)
+			m.logger.Printf("Dead: %v", g)
 		}
+		m.eventQueue.Queue(g.Gossip, g.Transmit)
 	}
 }
 

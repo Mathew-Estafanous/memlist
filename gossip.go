@@ -3,6 +3,7 @@ package memlist
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"github.com/google/btree"
 	"math"
 	"sync"
@@ -38,6 +39,10 @@ type GossipEvent struct {
 	Transmit int
 }
 
+func (g *GossipEvent) String() string {
+	return fmt.Sprintf("[%v: %v]", g.Gossip.Node.Name, g.Transmit)
+}
+
 func (g *GossipEvent) Less(i btree.Item) bool {
 	o := i.(*GossipEvent)
 	if g.Transmit < o.Transmit {
@@ -65,6 +70,13 @@ func (q *GossipEventQueue) Queue(g Gossip, transmitNum int) {
 		Gossip:   g,
 		Transmit: transmitNum,
 	}
+
+	// ensure that to transmit number is not greater than the limit. If so
+	// then we should not add it to the queue.
+	if transmitNum > q.calcTransmitLimit() {
+		return
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var remove []*GossipEvent
@@ -96,11 +108,11 @@ func (q *GossipEventQueue) GetGossipEvents(limit int) ([]byte, error) {
 		return true
 	})
 
-	transmitLimit := calcTransmitLimit(q.numNodes())
+	transmitLimit := q.calcTransmitLimit()
 	for _, g := range gossips {
 		_ = q.bt.Delete(g)
 		g.Transmit++
-		if g.Transmit < transmitLimit {
+		if g.Transmit <= transmitLimit {
 			q.bt.ReplaceOrInsert(g)
 		}
 	}
@@ -123,7 +135,7 @@ func (q *GossipEventQueue) orderedView() []*GossipEvent {
 	return gossipQueue
 }
 
-func calcTransmitLimit(totalNodes int) int {
-	limit := math.Ceil(math.Log10(float64(totalNodes + 1)))
+func (q *GossipEventQueue) calcTransmitLimit() int {
+	limit := math.Ceil(math.Log10(float64(q.numNodes() + 1)))
 	return int(limit)
 }
