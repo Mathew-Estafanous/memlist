@@ -139,7 +139,7 @@ func (m *Member) Join(addr string) error {
 		m.addNewNode(&n)
 	}
 
-	m.logger.Printf("[CHANGE] Successfully joined the cluster")
+	//m.logger.Printf("[CHANGE] Join Cluster: %v", m.probeList)
 	return nil
 }
 
@@ -240,6 +240,12 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	switch messageType(msgB[0]) {
 	case ping:
 		m.handlePing(dec, from)
+		gossipB, err := io.ReadAll(reader)
+		if err != nil && err != io.EOF {
+			m.logger.Printf("[ERROR] Failed to read gossip bytes from packet: %v", err)
+			return
+		}
+		m.handleGossips(gossipB)
 	case indirectPing:
 		m.handleIndirectPing(dec, from)
 	case ack:
@@ -249,12 +255,6 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 		return
 	}
 
-	gossipB, err := io.ReadAll(reader)
-	if err != nil && err != io.EOF {
-		m.logger.Printf("[ERROR] Failed to read gossip bytes from packet: %v", err)
-		return
-	}
-	m.handleGossips(gossipB)
 }
 
 func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
@@ -271,7 +271,6 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 
 	ackR := ackResp{ReqNo: p.ReqNo}
 	b := encodeMessage(ack, &ackR)
-	b = m.piggyBackGossip(b)
 	var addr string
 	if p.FromPort > 0 && p.FromAddr != "" {
 		addr = net.JoinHostPort(p.FromAddr, strconv.Itoa(int(p.FromPort)))
@@ -307,7 +306,6 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 		}
 		ackR := ackResp{ReqNo: ind.ReqNo}
 		b := encodeMessage(ack, &ackR)
-		b = m.piggyBackGossip(b)
 
 		var addr string
 		if ind.FromPort > 0 && ind.FromAddr != "" {
@@ -435,7 +433,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 	m.nodeMu.Lock()
 	// randomly select other nodes to ask for indirect probes
 	for k, v := range m.nodeMap {
-		if k == send.Name {
+		if k == send.Name && v.State != Dead {
 			continue
 		}
 
@@ -457,7 +455,6 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			FromAddr: m.conf.BindAddr,
 		}
 		b := encodeMessage(indirectPing, indPing)
-		b = m.piggyBackGossip(b)
 		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
 			log.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
@@ -480,7 +477,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		m.logger.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
 		m.removeNode(send)
 		deadGossip := Gossip{
-			Gt: dead,
+			Gt:   dead,
 			Node: *send,
 		}
 		m.eventQueue.Queue(deadGossip, 0)
@@ -530,15 +527,20 @@ func (m *Member) handleConn(conn net.Conn) {
 			Node: *joiningPeer,
 		}
 		m.eventQueue.Queue(gossip, 0)
+		m.logger.Printf("[CHANGE] Node Joined: %v", m.probeList)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
 		return
 	}
 }
 
-func (m *Member) addNewNode(n *Node) {
+func (m *Member) addNewNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
+	if _, ok := m.nodeMap[n.Name]; ok {
+		return false
+	}
+
 	m.nodeMap[n.Name] = n
 	m.aliveNodes++
 
@@ -548,20 +550,22 @@ func (m *Member) addNewNode(n *Node) {
 		// randomly insert new node into probe list.
 		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
 	}
+	return true
 }
 
-func (m *Member) removeNode(n *Node) {
-	n.State = Dead
+func (m *Member) removeNode(n *Node) bool {
 	m.nodeMu.Lock()
+	defer m.nodeMu.Unlock()
+	n.State = Dead
 	m.aliveNodes--
 	// node should no longer be part of the probe list since it is considered dead.
 	for i, v := range m.probeList {
 		if v == n.Name {
 			m.probeList = remove(m.probeList, i)
-			break
+			return true
 		}
 	}
-	m.nodeMu.Unlock()
+	return false
 }
 
 func (m *Member) handleGossips(b []byte) {
@@ -579,18 +583,20 @@ func (m *Member) handleGossips(b []byte) {
 			continue
 		}
 
-		// TODO: Handle leaving node differently from dead node.
+		var success bool
 		switch g.Gossip.Gt {
 		case join:
-			m.addNewNode(&g.Gossip.Node)
-			m.logger.Printf("Joining: %v", g)
+			success = m.addNewNode(&g.Gossip.Node)
 		case leave:
-			m.removeNode(&g.Gossip.Node)
+			// TODO: Handle leaving node differently from dead node.
+			success = m.removeNode(&g.Gossip.Node)
 		case dead:
-			m.removeNode(&g.Gossip.Node)
-			m.logger.Printf("Dead: %v", g)
+			success = m.removeNode(&g.Gossip.Node)
 		}
-		m.eventQueue.Queue(g.Gossip, g.Transmit)
+
+		if success {
+			m.eventQueue.Queue(g.Gossip, 0)
+		}
 	}
 }
 

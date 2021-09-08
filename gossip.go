@@ -71,12 +71,6 @@ func (q *GossipEventQueue) Queue(g Gossip, transmitNum int) {
 		Transmit: transmitNum,
 	}
 
-	// ensure that to transmit number is not greater than the limit. If so
-	// then we should not add it to the queue.
-	if transmitNum > q.calcTransmitLimit() {
-		return
-	}
-
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var remove []*GossipEvent
