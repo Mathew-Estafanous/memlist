@@ -139,7 +139,6 @@ func (m *Member) Join(addr string) error {
 		m.addNewNode(&n)
 	}
 
-	//m.logger.Printf("[CHANGE] Join Cluster: %v", m.probeList)
 	return nil
 }
 
@@ -457,12 +456,12 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		b := encodeMessage(indirectPing, indPing)
 		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
-			log.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
+			m.logger.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
 		}
 
 		h := func(a ackResp, from net.Addr) {
 			if a.ReqNo != indPing.ReqNo {
-				log.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.ReqNo, indPing.ReqNo)
+				m.logger.Printf("[WARNING] Received wrong ack response with seq. number (%v) instead of %v", a.ReqNo, indPing.ReqNo)
 				return
 			}
 			responded <- true
@@ -534,6 +533,8 @@ func (m *Member) handleConn(conn net.Conn) {
 	}
 }
 
+// addNewNode will add the node to the map and return true as long as there are no
+// duplicates found. Otherwise, the result will be false.
 func (m *Member) addNewNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
@@ -553,6 +554,9 @@ func (m *Member) addNewNode(n *Node) bool {
 	return true
 }
 
+// removeNode will remove the node from the probeList as long as it is found. If
+// no matching node is found, then the result will be false. Otherwise, the response
+// will be true.
 func (m *Member) removeNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
