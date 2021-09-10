@@ -65,10 +65,10 @@ type GossipEventQueue struct {
 	bt *btree.BTree
 }
 
-func (q *GossipEventQueue) Queue(g Gossip, transmitNum int) {
+func (q *GossipEventQueue) Queue(g Gossip) {
 	ge := &GossipEvent{
 		Gossip:   g,
-		Transmit: transmitNum,
+		Transmit: 0,
 	}
 
 	q.mu.Lock()

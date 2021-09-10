@@ -479,7 +479,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			Gt:   dead,
 			Node: *send,
 		}
-		m.eventQueue.Queue(deadGossip, 0)
+		m.eventQueue.Queue(deadGossip)
 	}
 }
 
@@ -525,7 +525,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			Gt:   join,
 			Node: *joiningPeer,
 		}
-		m.eventQueue.Queue(gossip, 0)
+		m.eventQueue.Queue(gossip)
 		m.logger.Printf("[CHANGE] Node Joined: %v", m.probeList)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
@@ -599,7 +599,7 @@ func (m *Member) handleGossips(b []byte) {
 		}
 
 		if success {
-			m.eventQueue.Queue(g.Gossip, 0)
+			m.eventQueue.Queue(g.Gossip)
 		}
 	}
 }

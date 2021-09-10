@@ -24,7 +24,7 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
-		eventQue.Queue(g, 0)
+		eventQue.Queue(g)
 	}
 
 	queue := eventQue.orderedView()
@@ -36,7 +36,7 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 	}
 
 	invalidate := Gossip{Gt: dead, Node: Node{Name: "One"}}
-	eventQue.Queue(invalidate, 0)
+	eventQue.Queue(invalidate)
 
 	expected := [3]Gossip{
 		{Gt: join, Node: Node{Name: "Two"}},
@@ -62,7 +62,7 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
-		eventQue.Queue(g, 0)
+		eventQue.Queue(g)
 	}
 
 	resultBuf, err := eventQue.GetGossipEvents(2)
