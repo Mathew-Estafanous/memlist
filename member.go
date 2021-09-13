@@ -561,11 +561,11 @@ func (m *Member) removeNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
 	n.State = Dead
-	m.aliveNodes--
 	// node should no longer be part of the probe list since it is considered dead.
 	for i, v := range m.probeList {
 		if v == n.Name {
 			m.probeList = remove(m.probeList, i)
+			m.aliveNodes--
 			return true
 		}
 	}
