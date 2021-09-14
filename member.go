@@ -474,7 +474,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		return
 	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
 		m.logger.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
-		m.removeNode(send)
+		m.setDeadNode(send)
 		deadGossip := Gossip{
 			Gt:   dead,
 			Node: *send,
@@ -554,10 +554,10 @@ func (m *Member) addNewNode(n *Node) bool {
 	return true
 }
 
-// removeNode will remove the node from the probeList as long as it is found. If
+// setDeadNode will remove the node from the probeList as long as it is found. If
 // no matching node is found, then the result will be false. Otherwise, the response
 // will be true.
-func (m *Member) removeNode(n *Node) bool {
+func (m *Member) setDeadNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
 	n.State = Dead
@@ -568,6 +568,25 @@ func (m *Member) removeNode(n *Node) bool {
 			m.aliveNodes--
 			return true
 		}
+	}
+	return false
+}
+
+// removeNode will remove the node entirely, as if the node is no-longer part of the
+// cluster. If the node was successfully removed then the result is true.
+func (m *Member) removeNode(n *Node) bool {
+	m.nodeMu.Lock()
+	defer m.nodeMu.Unlock()
+	for i, v := range m.probeList {
+		if v == n.Name {
+			m.probeList = remove(m.probeList, i)
+			m.aliveNodes--
+		}
+	}
+
+	if _, ok := m.nodeMap[n.Name]; ok {
+		delete(m.nodeMap, n.Name)
+		return true
 	}
 	return false
 }
@@ -592,10 +611,9 @@ func (m *Member) handleGossips(b []byte) {
 		case join:
 			success = m.addNewNode(&g.Gossip.Node)
 		case leave:
-			// TODO: Handle leaving node differently from dead node.
 			success = m.removeNode(&g.Gossip.Node)
 		case dead:
-			success = m.removeNode(&g.Gossip.Node)
+			success = m.setDeadNode(&g.Gossip.Node)
 		}
 
 		if success {
