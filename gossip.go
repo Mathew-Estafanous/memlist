@@ -37,6 +37,17 @@ type GossipEvent struct {
 	Gossip Gossip
 	// Transmit is the number of times this event has been transmitted.
 	Transmit int
+
+	notify chan struct{}
+}
+
+// finished sends a notification message through the channel, signifying that
+// the event has successfully disseminated.
+func (g *GossipEvent) finished() {
+	select {
+	case g.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (g *GossipEvent) String() string {
@@ -65,10 +76,19 @@ type GossipEventQueue struct {
 	bt *btree.BTree
 }
 
+func (q *GossipEventQueue) QueueWithBroadcast(g Gossip, broadcast chan struct{})  {
+	q.queueEvent(g, broadcast)
+}
+
 func (q *GossipEventQueue) Queue(g Gossip) {
+	q.queueEvent(g, make(chan struct{}))
+}
+
+func (q *GossipEventQueue) queueEvent(g Gossip, notify chan struct{}) {
 	ge := &GossipEvent{
 		Gossip:   g,
 		Transmit: 0,
+		notify: notify,
 	}
 
 	q.mu.Lock()
@@ -108,6 +128,8 @@ func (q *GossipEventQueue) GetGossipEvents(limit int) ([]byte, error) {
 		g.Transmit++
 		if g.Transmit <= transmitLimit {
 			q.bt.ReplaceOrInsert(g)
+		} else {
+			g.finished()
 		}
 	}
 

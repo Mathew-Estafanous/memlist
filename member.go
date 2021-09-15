@@ -139,6 +139,7 @@ func (m *Member) Join(addr string) error {
 		m.addNewNode(&n)
 	}
 
+	m.hasStopped = false
 	return nil
 }
 
@@ -180,13 +181,35 @@ func (m *Member) Shutdown() error {
 	if err := m.transport.Shutdown(); err != nil {
 		return err
 	}
+	m.hasStopped = true
 	return nil
 }
 
 // Leave will safely stop all running processes and will notify other nodes
 // that it will be leaving the cluster. This is a blocking operation until
 // the member has successfully left the cluster.
-func (m *Member) Leave() error {
+func (m *Member) Leave(timeout time.Duration) error {
+	if m.hasStopped {
+		return fmt.Errorf("member has already stopped")
+	}
+
+	leaveGossip := Gossip{
+		Gt: leave,
+		Node: Node{
+			Name: m.conf.Name,
+			Addr: m.conf.BindAddr,
+			Port: m.conf.BindPort,
+			State: Alive,
+		},
+	}
+	broadcast := make(chan struct{})
+	m.eventQueue.QueueWithBroadcast(leaveGossip, broadcast)
+	select {
+	case <- broadcast:
+	case <- time.After(timeout):
+		return fmt.Errorf("timed out while waiting for leave broadcast")
+	}
+	m.logger.Println("[CHANGE] Node has successfully left the cluster.")
 	return nil
 }
 
@@ -612,6 +635,9 @@ func (m *Member) handleGossips(b []byte) {
 			success = m.addNewNode(&g.Gossip.Node)
 		case leave:
 			success = m.removeNode(&g.Gossip.Node)
+			if success {
+				m.logger.Printf("[CHANGE] Node %v has left the cluster.", g.Gossip.Node.Name)
+			}
 		case dead:
 			success = m.setDeadNode(&g.Gossip.Node)
 		}

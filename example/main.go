@@ -9,7 +9,7 @@ import (
 func main() {
 	conf1 := memlist.DefaultLocalConfig()
 	conf1.Name = "ONE"
-	mem1, err := memlist.Create(conf1)
+	_, err := memlist.Create(conf1)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -38,11 +38,7 @@ func main() {
 
 	stop := make(chan bool)
 	time.Sleep(3 * time.Second)
-	log.Printf("ONE: %v", mem1.AllNodes())
-	log.Printf("TWO: %v", mem2.AllNodes())
-	log.Printf("THREE: %v", mem3.AllNodes())
-	log.Println("Shutting down Member 2")
-	if err = mem2.Shutdown(); err != nil {
+	if err = mem2.Leave(5 * time.Second); err != nil {
 		log.Fatalln(err)
 	}
 	<- stop
