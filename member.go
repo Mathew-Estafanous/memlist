@@ -187,7 +187,7 @@ func (m *Member) Shutdown() error {
 
 // Leave will safely stop all running processes and will notify other nodes
 // that it will be leaving the cluster. This is a blocking operation until
-// the member has successfully left the cluster.
+// the member has successfully left the cluster or the timeout has been reached.
 func (m *Member) Leave(timeout time.Duration) error {
 	if m.hasStopped {
 		return fmt.Errorf("member has already stopped")
@@ -196,19 +196,20 @@ func (m *Member) Leave(timeout time.Duration) error {
 	leaveGossip := Gossip{
 		Gt: leave,
 		Node: Node{
-			Name: m.conf.Name,
-			Addr: m.conf.BindAddr,
-			Port: m.conf.BindPort,
+			Name:  m.conf.Name,
+			Addr:  m.conf.BindAddr,
+			Port:  m.conf.BindPort,
 			State: Alive,
 		},
 	}
 	broadcast := make(chan struct{})
 	m.eventQueue.QueueWithBroadcast(leaveGossip, broadcast)
 	select {
-	case <- broadcast:
-	case <- time.After(timeout):
+	case <-broadcast:
+	case <-time.After(timeout):
 		return fmt.Errorf("timed out while waiting for leave broadcast")
 	}
+	close(m.shutdownCh)
 	m.logger.Println("[CHANGE] Node has successfully left the cluster.")
 	return nil
 }
@@ -282,7 +283,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	var p pingReq
 	if err := dec.Decode(&p); err != nil {
-		log.Printf("[ERROR] Failed to decode byte slice into PingReq. %v", err)
+		log.Printf("[ERROR] Failed to decode byte slice from (%v) into PingReq. %v", from.String(), err)
 		return
 	}
 
@@ -447,12 +448,19 @@ func (m *Member) sendProbe() {
 	case <-responded:
 		sendNode.State = Alive
 		return
+	case <-m.shutdownCh:
+		return
 	}
 }
 
 func (m *Member) sendIndirectProbe(send *Node) {
 	var nodes []*Node
 	m.nodeMu.Lock()
+	if m.aliveNodes <= 1 {
+		m.logger.Println("[INFO] There aren't enough nodes to send indirect probes to.")
+		return
+	}
+
 	// randomly select other nodes to ask for indirect probes
 	for k, v := range m.nodeMap {
 		if k == send.Name && v.State != Dead {
@@ -503,6 +511,8 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			Node: *send,
 		}
 		m.eventQueue.Queue(deadGossip)
+	case <-m.shutdownCh:
+		return
 	}
 }
 
@@ -640,6 +650,9 @@ func (m *Member) handleGossips(b []byte) {
 			}
 		case dead:
 			success = m.setDeadNode(&g.Gossip.Node)
+			if success {
+				m.logger.Printf("[WARNING] Node %v has failed and is considered dead.", g.Gossip.Node.Name)
+			}
 		}
 
 		if success {

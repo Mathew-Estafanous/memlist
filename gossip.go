@@ -76,10 +76,15 @@ type GossipEventQueue struct {
 	bt *btree.BTree
 }
 
-func (q *GossipEventQueue) QueueWithBroadcast(g Gossip, broadcast chan struct{})  {
+// QueueWithBroadcast is similar to Queue; however it provides the ability to inject a broadcast
+// channel that is notified when the gossip has successfully disseminated across the cluster.
+func (q *GossipEventQueue) QueueWithBroadcast(g Gossip, broadcast chan struct{}) {
 	q.queueEvent(g, broadcast)
 }
 
+// Queue will add the gossip to the queue of events that will be eventually disseminated
+// across the cluster.
+// If a notification when the gossip has finished disseminating, look into using QueueWithBroadcast.
 func (q *GossipEventQueue) Queue(g Gossip) {
 	q.queueEvent(g, make(chan struct{}))
 }
@@ -88,7 +93,7 @@ func (q *GossipEventQueue) queueEvent(g Gossip, notify chan struct{}) {
 	ge := &GossipEvent{
 		Gossip:   g,
 		Transmit: 0,
-		notify: notify,
+		notify:   notify,
 	}
 
 	q.mu.Lock()
