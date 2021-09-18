@@ -163,7 +163,7 @@ func (m *Member) TotalNodes() int {
 	return int(m.aliveNodes)
 }
 
-// Shutdown will stop all background processes such as responded to received
+// Shutdown will stop all background processes such as responding to received
 // packets. No message will be sent regarding leaving the cluster and as a
 // result the member will eventually be considered 'dead'.
 //
@@ -664,11 +664,11 @@ func (m *Member) handleGossips(b []byte) {
 // piggyBackGossip will append a byte slice containing data regarding the
 // gossip events in the queue and return the resulting complete slice.
 func (m *Member) piggyBackGossip(b []byte) []byte {
-	gbuf, err := m.eventQueue.GetGossipEvents(gossipLimit)
+	buff, err := m.eventQueue.GetGossipEvents(gossipLimit)
 	if err != nil {
 		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
 	} else {
-		b = append(b, gbuf...)
+		b = append(b, buff...)
 	}
 	return b
 }
