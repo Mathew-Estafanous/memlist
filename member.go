@@ -46,6 +46,7 @@ type Member struct {
 
 	conf       *Config
 	transport  Transport
+	listener   Listener
 	eventQueue *GossipEventQueue
 
 	ackMu       sync.Mutex
@@ -81,10 +82,15 @@ func Create(conf *Config) (*Member, error) {
 		transport = t
 	}
 
+	if conf.EventListener == nil {
+		conf.EventListener = &emptyListener{}
+	}
+
 	l := log.New(os.Stdout, fmt.Sprintf("[%v] ", conf.Name), log.LstdFlags)
 	m := &Member{
 		conf:        conf,
 		transport:   transport,
+		listener:    conf.EventListener,
 		nodeMap:     make(map[string]*Node),
 		probeList:   make([]string, 0),
 		ackHandlers: make(map[uint32]handler),

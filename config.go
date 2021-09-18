@@ -37,6 +37,10 @@ type Config struct {
 	// TCPTimeout is the time in which a TCP connection will be attempted. If no
 	// connection is made before reaching the timeout, then the attempt will fail.
 	TCPTimeout time.Duration
+
+	// EventListener can be used to inject the client's implementation of the Listener.
+	// If nothing is injected, then Create will use a fake listener in its place.
+	EventListener Listener
 }
 
 // DefaultLocalConfig returns a configuration that is set up for a local environment.
@@ -50,5 +54,6 @@ func DefaultLocalConfig() *Config {
 		ProbeInterval:  1 * time.Second,
 		IndirectChecks: 1,
 		TCPTimeout:     15 * time.Second,
+		EventListener:  &emptyListener{},
 	}
 }

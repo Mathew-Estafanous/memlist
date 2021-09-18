@@ -4,7 +4,13 @@ package memlist
 // and gossip layer of the Member. Providing a way to listen for important
 // events. This listener must be thread-safe.
 type Listener interface {
-	// OnPeerChange is called when there is a change in the state of a
-	// peer or if a new peer has joined the cluster.
-	OnPeerChange(peer Node)
+	// OnMembershipChange is called when there is a change in the state of a
+	// peer or if a peer has joined/left the cluster.
+	OnMembershipChange(peer Node)
 }
+
+// emptyListener is a stub struct that is used in the case that there is no
+// provided Listener. This listener does nothing with each event.
+type emptyListener struct{}
+
+func (e *emptyListener) OnMembershipChange(_ Node) {}
