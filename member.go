@@ -22,6 +22,7 @@ type StateType int
 const (
 	Alive StateType = iota
 	Dead
+	Left
 )
 
 const packetDelim = '$'
@@ -590,6 +591,9 @@ func (m *Member) addNewNode(n *Node) bool {
 		// randomly insert new node into probe list.
 		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
 	}
+
+	// notify listener of new peer being added to the cluster.
+	m.listener.OnMembershipChange(*n)
 	return true
 }
 
@@ -605,6 +609,9 @@ func (m *Member) setDeadNode(n *Node) bool {
 		if v == n.Name {
 			m.probeList = remove(m.probeList, i)
 			m.aliveNodes--
+
+			// notify listener of peer being considered dead.
+			m.listener.OnMembershipChange(*n)
 			return true
 		}
 	}
@@ -625,6 +632,10 @@ func (m *Member) removeNode(n *Node) bool {
 
 	if _, ok := m.nodeMap[n.Name]; ok {
 		delete(m.nodeMap, n.Name)
+		n.State = Left
+
+		// notify listener of peer leaving cluster.
+		m.listener.OnMembershipChange(*n)
 		return true
 	}
 	return false
