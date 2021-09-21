@@ -56,8 +56,8 @@ type Member struct {
 	nodeMu     sync.Mutex
 	nodeMap    map[string]*Node
 	aliveNodes uint32
-	probeList  []string
-	probeIdx   int
+	pingList []string
+	pingIdx  int
 
 	shutdownCh chan struct{}
 	hasStopped bool
@@ -93,7 +93,7 @@ func Create(conf *Config) (*Member, error) {
 		transport:   transport,
 		listener:    conf.EventListener,
 		nodeMap:     make(map[string]*Node),
-		probeList:   make([]string, 0),
+		pingList:    make([]string, 0),
 		ackHandlers: make(map[uint32]handler),
 		shutdownCh:  make(chan struct{}),
 		logger:      l,
@@ -295,7 +295,7 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	if p.Node != m.conf.Name {
-		m.logger.Printf("[WARNING] Received an unexpected sendProbe for Node: %s", p.Node)
+		m.logger.Printf("[WARNING] Received an unexpected sendPing for Node: %s", p.Node)
 		return
 	}
 
@@ -328,7 +328,7 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 		FromPort: m.conf.BindPort,
 	}
 
-	// Set up an ack handler to route the ack response back to Node that sent the indirect sendProbe request.
+	// Set up an ack handler to route the ack response back to Node that sent the indirect sendPing request.
 	ackRespHandler := func(a ackResp, from net.Addr) {
 		if a.ReqNo != p.ReqNo {
 			log.Printf("[WARNING] Received an ack response with seq. number (%v) when %v is wanted", a.ReqNo, p.ReqNo)
@@ -349,14 +349,14 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 		}
 	}
 	// Add the handler so that it gets called
-	m.addAckHandler(ackRespHandler, p.ReqNo, m.conf.ProbeTimeout)
+	m.addAckHandler(ackRespHandler, p.ReqNo, m.conf.PingTimeout)
 
 	b := encodeMessage(ping, &p)
 	b = m.piggyBackGossip(b)
 	var addr string
 	addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
 	if err := m.transport.SendTo(b, addr); err != nil {
-		m.logger.Printf("[ERROR] Encountered an issue when sending sendProbe. %v", err)
+		m.logger.Printf("[ERROR] Encountered an issue when sending sendPing. %v", err)
 	}
 }
 
@@ -396,32 +396,32 @@ func (m *Member) addAckHandler(h handler, seqNo uint32, timeout time.Duration) {
 func (m *Member) runSchedule() {
 	for {
 		select {
-		case <-time.After(m.conf.ProbeInterval):
-			m.sendProbe()
+		case <-time.After(m.conf.PingInterval):
+			m.sendPing()
 		case <-m.shutdownCh:
 			return
 		}
 	}
 }
 
-func (m *Member) sendProbe() {
+func (m *Member) sendPing() {
 	m.nodeMu.Lock()
 	if m.aliveNodes == 0 {
-		m.logger.Println("[INFO] There are no known alive nodes to send a probe to.")
+		m.logger.Println("[INFO] There are no known alive nodes to send a ping to.")
 		return
 	}
 
-	// get the next peer to send probe to, depending on the list. Ensuring every peer is
-	// sent a probe periodically, guaranteeing that all peers will be reached at some point.
-	if m.probeIdx >= len(m.probeList) {
-		m.probeIdx = 0
+	// get the next peer to send ping to, depending on the list. Ensuring every peer is
+	// sent a ping periodically, guaranteeing that all peers will be reached at some point.
+	if m.pingIdx >= len(m.pingList) {
+		m.pingIdx = 0
 	}
-	name := m.probeList[m.probeIdx]
+	name := m.pingList[m.pingIdx]
 	sendNode := m.nodeMap[name]
-	m.probeIdx++
+	m.pingIdx++
 	m.nodeMu.Unlock()
 
-	// Make ping/probe request and send it to the selected Node.
+	// Make ping/ping request and send it to the selected Node.
 	p := &pingReq{
 		ReqNo:    m.nextReqNum(),
 		Node:     sendNode.Name,
@@ -445,13 +445,13 @@ func (m *Member) sendProbe() {
 		}
 		close(responded)
 	}
-	m.addAckHandler(h, p.ReqNo, m.conf.ProbeTimeout)
+	m.addAckHandler(h, p.ReqNo, m.conf.PingTimeout)
 
-	// Wait for "ack" response until timeout. In which we switch making an indirect probe.
+	// Wait for "ack" response until timeout. In which we switch making an indirect ping.
 	select {
-	case <-time.After(m.conf.ProbeTimeout):
-		m.logger.Printf("[INFO] Sending indirect probe to %v.", sendNode.Name)
-		m.sendIndirectProbe(sendNode)
+	case <-time.After(m.conf.PingTimeout):
+		m.logger.Printf("[INFO] Sending indirect ping to %v.", sendNode.Name)
+		m.sendIndirectPing(sendNode)
 	case <-responded:
 		sendNode.State = Alive
 		return
@@ -460,15 +460,15 @@ func (m *Member) sendProbe() {
 	}
 }
 
-func (m *Member) sendIndirectProbe(send *Node) {
+func (m *Member) sendIndirectPing(send *Node) {
 	var nodes []*Node
 	m.nodeMu.Lock()
 	if m.aliveNodes <= 1 {
-		m.logger.Println("[INFO] There aren't enough nodes to send indirect probes to.")
+		m.logger.Println("[INFO] There aren't enough nodes to send indirect pings to.")
 		return
 	}
 
-	// randomly select other nodes to ask for indirect probes
+	// randomly select other nodes to ask for indirect pings
 	for k, v := range m.nodeMap {
 		if k == send.Name && v.State != Dead {
 			continue
@@ -494,7 +494,7 @@ func (m *Member) sendIndirectProbe(send *Node) {
 		b := encodeMessage(indirectPing, indPing)
 		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
-			m.logger.Printf("[ERROR] Failed to send indirect probe to Node %v: %v", n.Name, err)
+			m.logger.Printf("[ERROR] Failed to send indirect ping to Node %v: %v", n.Name, err)
 		}
 
 		h := func(a ackResp, from net.Addr) {
@@ -504,13 +504,13 @@ func (m *Member) sendIndirectProbe(send *Node) {
 			}
 			responded <- true
 		}
-		m.addAckHandler(h, indPing.ReqNo, m.conf.ProbeInterval)
+		m.addAckHandler(h, indPing.ReqNo, m.conf.PingInterval)
 	}
 
 	select {
 	case <-responded:
 		return
-	case <-time.After(m.conf.ProbeInterval - m.conf.ProbeTimeout):
+	case <-time.After(m.conf.PingInterval - m.conf.PingTimeout):
 		m.logger.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
 		m.setDeadNode(send)
 		deadGossip := Gossip{
@@ -566,7 +566,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			Node: *joiningPeer,
 		}
 		m.eventQueue.Queue(gossip)
-		m.logger.Printf("[CHANGE] Node Joined: %v", m.probeList)
+		m.logger.Printf("[CHANGE] Node Joined: %v", m.pingList)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
 		return
@@ -585,11 +585,11 @@ func (m *Member) addNewNode(n *Node) bool {
 	m.nodeMap[n.Name] = n
 	m.aliveNodes++
 
-	if len(m.probeList) == 0 {
-		m.probeList = insert(m.probeList, 0, n.Name)
+	if len(m.pingList) == 0 {
+		m.pingList = insert(m.pingList, 0, n.Name)
 	} else {
-		// randomly insert new node into probe list.
-		m.probeList = insert(m.probeList, rand.Intn(len(m.probeList)), n.Name)
+		// randomly insert new node into ping list.
+		m.pingList = insert(m.pingList, rand.Intn(len(m.pingList)), n.Name)
 	}
 
 	// notify listener of new peer being added to the cluster.
@@ -597,17 +597,17 @@ func (m *Member) addNewNode(n *Node) bool {
 	return true
 }
 
-// setDeadNode will remove the node from the probeList as long as it is found. If
+// setDeadNode will remove the node from the pingList as long as it is found. If
 // no matching node is found, then the result will be false. Otherwise, the response
 // will be true.
 func (m *Member) setDeadNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
 	n.State = Dead
-	// node should no longer be part of the probe list since it is considered dead.
-	for i, v := range m.probeList {
+	// node should no longer be part of the ping list since it is considered dead.
+	for i, v := range m.pingList {
 		if v == n.Name {
-			m.probeList = remove(m.probeList, i)
+			m.pingList = remove(m.pingList, i)
 			m.aliveNodes--
 
 			// notify listener of peer being considered dead.
@@ -623,9 +623,9 @@ func (m *Member) setDeadNode(n *Node) bool {
 func (m *Member) removeNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
-	for i, v := range m.probeList {
+	for i, v := range m.pingList {
 		if v == n.Name {
-			m.probeList = remove(m.probeList, i)
+			m.pingList = remove(m.pingList, i)
 			m.aliveNodes--
 		}
 	}

@@ -14,18 +14,18 @@ type Config struct {
 	BindAddr string
 	BindPort uint16
 
-	// ProbeInterval is the time between attempts at random probes towards
+	// PingInterval is the time between attempts at random pings towards
 	// another Node. Decreasing the interval will result in more frequent
 	// checks at the cost of increased bandwidth usage.
 	//
-	// ProbeTimeout is the timeout a Node will wait for an ACK response from
+	// PingTimeout is the timeout a Node will wait for an ACK response from
 	// any member before determining that the Node is potentially unhealthy.
-	ProbeInterval time.Duration
-	ProbeTimeout  time.Duration
+	PingInterval time.Duration
+	PingTimeout  time.Duration
 
 	// IndirectChecks is the number of nodes that will be contacted in the case
-	// that an indirect sendProbe is required. Increasing the number of checks will
-	// also increase the chances of an indirect sendProbe succeeding. This is at the
+	// that an indirect sendPing is required. Increasing the number of checks will
+	// also increase the chances of an indirect sendPing succeeding. This is at the
 	// expense of bandwidth usage.
 	IndirectChecks int
 
@@ -50,8 +50,8 @@ func DefaultLocalConfig() *Config {
 		Name:           host,
 		BindAddr:       "127.0.0.1",
 		BindPort:       7990,
-		ProbeTimeout:   200 * time.Millisecond,
-		ProbeInterval:  1 * time.Second,
+		PingTimeout:    200 * time.Millisecond,
+		PingInterval:   1 * time.Second,
 		IndirectChecks: 1,
 		TCPTimeout:     15 * time.Second,
 		EventListener:  &emptyListener{},

@@ -23,7 +23,7 @@ type pingReq struct {
 	// verification for the receiving Node.
 	Node string
 
-	// The address and Port of the Node that is sending the sendProbe request.
+	// The address and Port of the Node that is sending the sendPing request.
 	FromAddr string
 	FromPort uint16
 }
@@ -31,12 +31,12 @@ type pingReq struct {
 type indirectPingReq struct {
 	ReqNo uint32
 
-	// Node is the Name of the Node that the sendProbe is targeted towards.
+	// Node is the Name of the Node that the sendPing is targeted towards.
 	Node     string
 	NodeAddr string
 	NodePort uint16
 
-	// The address and Port of the Node that is sending the sendProbe request.
+	// The address and Port of the Node that is sending the sendPing request.
 	FromAddr string
 	FromPort uint16
 }
