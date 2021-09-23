@@ -80,6 +80,8 @@ type Transport interface {
 	Shutdown() error
 }
 
+// NetTransport is the standard implementation of the Transport and should be enough for
+// most use cases.
 type NetTransport struct {
 	udpCon *net.UDPConn
 	tcpLsn *net.TCPListener
@@ -89,6 +91,8 @@ type NetTransport struct {
 	shutdown chan struct{}
 }
 
+// NewNetTransport will create and return a NetTransport that is properly setup with udp
+// and tcp listeners.
 func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	ok := true
 	t := &NetTransport{

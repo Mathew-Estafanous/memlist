@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// Config provides different options that can be adjusted according to what is needed of the
+// member. Some fields are required and should not be left empty when creating a new member.
 type Config struct {
 	// A Name for the Node that is unique to the entire cluster.
 	Name string

@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func newGossipEventQueue() *GossipEventQueue {
-	return &GossipEventQueue{
+func newGossipEventQueue() *gossipEventQueue {
+	return &gossipEventQueue{
 		numNodes: func() int {
 			return 3
 		},
@@ -24,7 +24,7 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
-		eventQue.Queue(g)
+		eventQue.queue(g)
 	}
 
 	queue := eventQue.orderedView()
@@ -36,7 +36,7 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 	}
 
 	invalidate := Gossip{Gt: dead, Node: Node{Name: "One"}}
-	eventQue.Queue(invalidate)
+	eventQue.queue(invalidate)
 
 	expected := [3]Gossip{
 		{Gt: join, Node: Node{Name: "Two"}},
@@ -44,7 +44,7 @@ func TestGossipEventQueue_Queue(t *testing.T) {
 		{Gt: dead, Node: Node{Name: "One"}}}
 	queue = eventQue.orderedView()
 	if len(queue) != len(expected) {
-		t.Fatalf("Queue length %v does not match expected length %v.", len(queue), len(expected))
+		t.Fatalf("queue length %v does not match expected length %v.", len(queue), len(expected))
 	}
 
 	for i := range queue {
@@ -62,15 +62,15 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 		{Gt: join, Node: Node{Name: "One"}}}
 	eventQue := newGossipEventQueue()
 	for _, g := range gossips {
-		eventQue.Queue(g)
+		eventQue.queue(g)
 	}
 
-	resultBuf, err := eventQue.GetGossipEvents(2)
+	resultBuf, err := eventQue.getGossipEvents(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expected := []*GossipEvent{
+	expected := []*gossipEvent{
 		{Transmit: 1, Gossip: gossips[0]},
 		{Transmit: 1, Gossip: gossips[1]},
 	}
@@ -85,7 +85,7 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 	}
 
 	result := eventQue.orderedView()
-	expected = []*GossipEvent{{Transmit: 0, Gossip: gossips[2]}}
+	expected = []*gossipEvent{{Transmit: 0, Gossip: gossips[2]}}
 	if !reflect.DeepEqual(result, expected) {
 		t.Fatal("Expected remaining events do not match the result.")
 	}

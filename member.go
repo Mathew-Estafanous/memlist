@@ -48,7 +48,7 @@ type Member struct {
 	conf       *Config
 	transport  Transport
 	listener   Listener
-	eventQueue *GossipEventQueue
+	eventQueue *gossipEventQueue
 
 	ackMu       sync.Mutex
 	ackHandlers map[uint32]handler
@@ -99,7 +99,7 @@ func Create(conf *Config) (*Member, error) {
 		logger:      l,
 	}
 
-	m.eventQueue = &GossipEventQueue{
+	m.eventQueue = &gossipEventQueue{
 		numNodes: m.TotalNodes,
 		bt:       btree.New(2),
 	}
@@ -210,7 +210,7 @@ func (m *Member) Leave(timeout time.Duration) error {
 		},
 	}
 	broadcast := make(chan struct{})
-	m.eventQueue.QueueWithBroadcast(leaveGossip, broadcast)
+	m.eventQueue.queueWithBroadcast(leaveGossip, broadcast)
 	select {
 	case <-broadcast:
 	case <-time.After(timeout):
@@ -517,7 +517,7 @@ func (m *Member) sendIndirectPing(send *Node) {
 			Gt:   dead,
 			Node: *send,
 		}
-		m.eventQueue.Queue(deadGossip)
+		m.eventQueue.queue(deadGossip)
 	case <-m.shutdownCh:
 		return
 	}
@@ -565,7 +565,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			Gt:   join,
 			Node: *joiningPeer,
 		}
-		m.eventQueue.Queue(gossip)
+		m.eventQueue.queue(gossip)
 		m.logger.Printf("[CHANGE] Node Joined: %v", m.pingList)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
@@ -642,7 +642,7 @@ func (m *Member) removeNode(n *Node) bool {
 }
 
 func (m *Member) handleGossips(b []byte) {
-	gossipEvents := make([]*GossipEvent, 0)
+	gossipEvents := make([]*gossipEvent, 0)
 	dec := gob.NewDecoder(bytes.NewReader(b))
 	if err := dec.Decode(&gossipEvents); err != nil {
 		m.logger.Printf("[ERROR] Failed to parse gossip events: %v", err)
@@ -673,7 +673,7 @@ func (m *Member) handleGossips(b []byte) {
 		}
 
 		if success {
-			m.eventQueue.Queue(g.Gossip)
+			m.eventQueue.queue(g.Gossip)
 		}
 	}
 }
@@ -681,7 +681,7 @@ func (m *Member) handleGossips(b []byte) {
 // piggyBackGossip will append a byte slice containing data regarding the
 // gossip events in the queue and return the resulting complete slice.
 func (m *Member) piggyBackGossip(b []byte) []byte {
-	buff, err := m.eventQueue.GetGossipEvents(gossipLimit)
+	buff, err := m.eventQueue.getGossipEvents(gossipLimit)
 	if err != nil {
 		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
 	} else {
