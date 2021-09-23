@@ -56,8 +56,8 @@ type Member struct {
 	nodeMu     sync.Mutex
 	nodeMap    map[string]*Node
 	aliveNodes uint32
-	pingList []string
-	pingIdx  int
+	pingList   []string
+	pingIdx    int
 
 	shutdownCh chan struct{}
 	hasStopped bool

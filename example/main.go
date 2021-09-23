@@ -41,5 +41,5 @@ func main() {
 	if err = mem2.Leave(5 * time.Second); err != nil {
 		log.Fatalln(err)
 	}
-	<- stop
+	<-stop
 }
