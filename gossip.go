@@ -157,6 +157,8 @@ func (q *gossipEventQueue) orderedView() []*gossipEvent {
 	return gossipQueue
 }
 
+// calcTransmitLimit will calculate transmit total using Log(N + 1) with N
+// being the number of known nodes.
 func (q *gossipEventQueue) calcTransmitLimit() int {
 	limit := math.Ceil(math.Log10(float64(q.numNodes() + 1)))
 	return int(limit)

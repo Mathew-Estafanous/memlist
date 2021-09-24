@@ -641,6 +641,9 @@ func (m *Member) removeNode(n *Node) bool {
 	return false
 }
 
+// handleGossips will parse the byte slice into a set of gossip events and apply
+// each gossip (if applicable) to its own state and potentially adding the gossip
+// to the queue to aid in disseminating the new event.
 func (m *Member) handleGossips(b []byte) {
 	gossipEvents := make([]*gossipEvent, 0)
 	dec := gob.NewDecoder(bytes.NewReader(b))
@@ -652,7 +655,6 @@ func (m *Member) handleGossips(b []byte) {
 	// handle the gossip event depending on the type of event it is.
 	for _, g := range gossipEvents {
 		if g.Gossip.Node.Name == m.conf.Name {
-			// TODO: Handle gossips that refer to self.
 			continue
 		}
 
@@ -672,6 +674,8 @@ func (m *Member) handleGossips(b []byte) {
 			}
 		}
 
+		// if the gossip was successful, then we should add it to the queue to then
+		// be spread to peers.
 		if success {
 			m.eventQueue.queue(g.Gossip)
 		}
