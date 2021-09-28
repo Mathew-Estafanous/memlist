@@ -3,43 +3,31 @@ package main
 import (
 	"github.com/Mathew-Estafanous/memlist"
 	"log"
-	"time"
+	"os"
+	"strconv"
 )
 
+// [exe] <BindPort> <Host Name> <Address* (of another node in the cluster)>
 func main() {
-	conf1 := memlist.DefaultLocalConfig()
-	conf1.Name = "ONE"
-	_, err := memlist.Create(conf1)
+	conf := memlist.DefaultLocalConfig()
+	conf.Name = os.Args[2]
+	port, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		log.Fatalln(err)
+	}
+	conf.BindPort = uint16(port)
+
+	mem, err := memlist.Create(conf)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	conf2 := memlist.DefaultLocalConfig()
-	conf2.Name = "TWO"
-	conf2.BindPort = 7970
-	mem2, err := memlist.Create(conf2)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = mem2.Join(":7990"); err != nil {
-		log.Fatalln(err)
-	}
-
-	conf3 := memlist.DefaultLocalConfig()
-	conf3.Name = "THREE"
-	conf3.BindPort = 7950
-	mem3, err := memlist.Create(conf3)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = mem3.Join(":7990"); err != nil {
-		log.Fatalln(err)
+	if len(os.Args) >= 4 {
+		if err := mem.Join(":" + os.Args[3]); err != nil {
+			log.Fatalln(err)
+		}
 	}
 
 	stop := make(chan bool)
-	time.Sleep(3 * time.Second)
-	if err = mem2.Leave(5 * time.Second); err != nil {
-		log.Fatalln(err)
-	}
 	<-stop
 }
