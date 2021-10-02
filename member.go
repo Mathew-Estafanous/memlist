@@ -77,7 +77,6 @@ func Create(conf *Config) (*Member, error) {
 	if transport == nil {
 		t, err := NewNetTransport(conf.BindAddr, conf.BindPort)
 		if err != nil {
-			// TODO: wrap errors so that the API doesn't expose internal errors.
 			return nil, err
 		}
 		transport = t
@@ -129,7 +128,13 @@ func (m *Member) Join(addr string) error {
 		Port:  m.conf.BindPort,
 		State: Alive,
 	}
-	if _, err = conn.Write(encodeMessage(joinSync, &n)); err != nil {
+	b, err := encodeMessage(joinSync, &n)
+	if err != nil {
+		m.logger.Printf("[ERROR] Failed to encode JoinSync message.")
+		return fmt.Errorf("failed to encode join sync message: %v", err)
+	}
+
+	if _, err = conn.Write(b); err != nil {
 		m.logger.Printf("[ERROR] Failed to send sync message to the host address: %v", err)
 		return fmt.Errorf("failed to join cluster: %v", err)
 	}
@@ -300,7 +305,12 @@ func (m *Member) handlePing(dec *gob.Decoder, from net.Addr) {
 	}
 
 	ackR := ackResp{ReqNo: p.ReqNo}
-	b := encodeMessage(ack, &ackR)
+	b, err := encodeMessage(ack, &ackR)
+	if err != nil {
+		m.logger.Printf("[ERROR] Failed to encode Ack response.")
+		return
+	}
+
 	var addr string
 	if p.FromPort > 0 && p.FromAddr != "" {
 		addr = net.JoinHostPort(p.FromAddr, strconv.Itoa(int(p.FromPort)))
@@ -335,7 +345,11 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 			return
 		}
 		ackR := ackResp{ReqNo: ind.ReqNo}
-		b := encodeMessage(ack, &ackR)
+		b, err := encodeMessage(ack, &ackR)
+		if err != nil {
+			m.logger.Printf("[ERROR] Failed to encode Ack response.")
+			return
+		}
 
 		var addr string
 		if ind.FromPort > 0 && ind.FromAddr != "" {
@@ -351,7 +365,12 @@ func (m *Member) handleIndirectPing(dec *gob.Decoder, _ net.Addr) {
 	// Add the handler so that it gets called
 	m.addAckHandler(ackRespHandler, p.ReqNo, m.conf.PingTimeout)
 
-	b := encodeMessage(ping, &p)
+	b, err := encodeMessage(ping, &p)
+	if err != nil {
+		m.logger.Printf("[ERROR] Failed to encode Ping response.")
+		return
+	}
+
 	b = m.piggyBackGossip(b)
 	var addr string
 	addr = net.JoinHostPort(ind.NodeAddr, strconv.Itoa(int(ind.NodePort)))
@@ -428,7 +447,12 @@ func (m *Member) sendPing() {
 		FromPort: m.conf.BindPort,
 		FromAddr: m.conf.BindAddr,
 	}
-	b := encodeMessage(ping, p)
+	b, err := encodeMessage(ping, p)
+	if err != nil {
+		m.logger.Printf("[ERROR] Failed to encode Ping response.")
+		return
+	}
+
 	b = m.piggyBackGossip(b)
 
 	addr := net.JoinHostPort(sendNode.Addr, strconv.Itoa(int(sendNode.Port)))
@@ -491,7 +515,12 @@ func (m *Member) sendIndirectPing(send *Node) {
 			FromPort: m.conf.BindPort,
 			FromAddr: m.conf.BindAddr,
 		}
-		b := encodeMessage(indirectPing, indPing)
+		b, err := encodeMessage(indirectPing, indPing)
+		if err != nil {
+			m.logger.Printf("[ERROR] Failed to encode IndirectPing response.")
+			return
+		}
+
 		addr := net.JoinHostPort(n.Addr, strconv.Itoa(int(n.Port)))
 		if err := m.transport.SendTo(b, addr); err != nil {
 			m.logger.Printf("[ERROR] Failed to send indirect ping to Node %v: %v", n.Name, err)
@@ -548,7 +577,12 @@ func (m *Member) handleConn(conn net.Conn) {
 			Addr: m.conf.BindAddr,
 			Port: m.conf.BindPort,
 		}
-		b := encodeMessage(joinSync, m.nodeMap)
+		b, err := encodeMessage(joinSync, m.nodeMap)
+		if err != nil {
+			m.logger.Printf("[ERROR] Failed to encode JoinSync message.")
+			return
+		}
+
 		// remove self from the map, since we now created the message.
 		delete(m.nodeMap, m.conf.Name)
 		if _, err := conn.Write(b[1:]); err != nil {
@@ -710,10 +744,12 @@ func insert(a []string, index int, value string) []string {
 
 // encodeMessage will encode the provided type into a byte slice and appends the
 // message type to the front of the byte slice.
-func encodeMessage(tp messageType, e interface{}) []byte {
+func encodeMessage(tp messageType, e interface{}) ([]byte, error) {
 	buf := bytes.NewBuffer([]byte{uint8(tp)})
 	enc := gob.NewEncoder(buf)
-	enc.Encode(e)
+	if err := enc.Encode(e); err != nil {
+		return nil, err
+	}
 	buf.Write([]byte{packetDelim})
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
