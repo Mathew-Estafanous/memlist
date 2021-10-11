@@ -85,7 +85,11 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 	}
 
 	result := eventQue.orderedView()
-	expected = []*gossipEvent{{Transmit: 0, Gossip: gossips[2]}}
+	expected = []*gossipEvent{
+		{Transmit: 1, Gossip: gossips[0]},
+		{Transmit: 1, Gossip: gossips[1]},
+		{Transmit: 0, Gossip: gossips[2]},
+	}
 	if !reflect.DeepEqual(result, expected) {
 		t.Fatal("Expected remaining events do not match the result.")
 	}
