@@ -152,6 +152,7 @@ func (m *Member) Join(addr string) error {
 	}
 
 	m.hasStopped = false
+	m.logger.Printf("[UPDATE] Successfully joined the cluster.")
 	return nil
 }
 
@@ -418,6 +419,7 @@ func (m *Member) runSchedule() {
 		case <-time.After(m.conf.PingInterval):
 			m.sendPing()
 		case <-m.shutdownCh:
+			log.Println("SHUTDOWN")
 			return
 		}
 	}
@@ -427,6 +429,7 @@ func (m *Member) sendPing() {
 	m.nodeMu.Lock()
 	if m.aliveNodes == 0 {
 		m.logger.Println("[INFO] There are no known alive nodes to send a ping to.")
+		m.nodeMu.Unlock()
 		return
 	}
 
@@ -454,7 +457,6 @@ func (m *Member) sendPing() {
 	}
 
 	b = m.piggyBackGossip(b)
-
 	addr := net.JoinHostPort(sendNode.Addr, strconv.Itoa(int(sendNode.Port)))
 	if err := m.transport.SendTo(b, addr); err != nil {
 		log.Printf("[ERROR] Failed to send initial ping to Node %v: %v", sendNode.Name, err)
@@ -489,6 +491,7 @@ func (m *Member) sendIndirectPing(send *Node) {
 	m.nodeMu.Lock()
 	if m.aliveNodes <= 1 {
 		m.logger.Println("[INFO] There aren't enough nodes to send indirect pings to.")
+		m.nodeMu.Unlock()
 		return
 	}
 
@@ -600,7 +603,6 @@ func (m *Member) handleConn(conn net.Conn) {
 			Node: *joiningPeer,
 		}
 		m.eventQueue.queue(gossip)
-		m.logger.Printf("[CHANGE] Node Joined: %v", m.pingList)
 	default:
 		m.logger.Printf("[ERROR] Received message type %v which is not a valid option.", msgT[0])
 		return
@@ -625,6 +627,7 @@ func (m *Member) addNewNode(n *Node) bool {
 		// randomly insert new node into ping list.
 		m.pingList = insert(m.pingList, rand.Intn(len(m.pingList)), n.Name)
 	}
+	m.logger.Printf("[CHANGE] Node Joined: %v", m.pingList)
 
 	// notify listener of new peer being added to the cluster.
 	m.listener.OnMembershipChange(*n)
