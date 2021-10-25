@@ -43,9 +43,8 @@ for node := range mem.AllNodes() {
 ## In Action
 Watch as memlist sucessfully identifies and forms a cluster with three nodes and automatically detects a failure in the THIRD
 node and successfully spreading this information accross the rest of the cluster.
-https://user-images.githubusercontent.com/56979977/138743693-974c21ca-6a98-44bc-869d-2e2f461ba880.mov
 
-
+https://user-images.githubusercontent.com/56979977/138744132-60343718-998c-401c-b279-8030e3efb247.mov
 
 ## Connect & Contact
 **Email** - mathewestafanous13@gmail.com
