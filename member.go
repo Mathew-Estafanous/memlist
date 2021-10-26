@@ -1,7 +1,6 @@
 package memlist
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/gob"
 	"fmt"
@@ -24,8 +23,6 @@ const (
 	Dead
 	Left
 )
-
-const packetDelim = '$'
 
 // Node represents a single node within the cluster and their
 // state within the cluster.
@@ -140,6 +137,7 @@ func (m *Member) Join(addr string) error {
 	}
 
 	var peerState map[string]Node
+	io.ReadAtLeast(conn, make([]byte, 4), 4)
 	dec := gob.NewDecoder(conn)
 	if err = dec.Decode(&peerState); err != nil {
 		m.logger.Printf("[ERROR] Failed to decode received message: %v", err)
@@ -260,23 +258,12 @@ func (m *Member) streamListen() {
 }
 
 func (m *Member) handlePacket(b []byte, from net.Addr) {
-	reader := bufio.NewReader(bytes.NewReader(b))
-	msgB, err := reader.ReadBytes(packetDelim)
-	if err != nil {
-		m.logger.Printf("[ERROR] Failed to read the message until ending delim (%v): %v", packetDelim, err)
-		return
-	}
-
-	if len(b) <= 1 {
-		m.logger.Println("[ERROR] Missing message type in payload.")
-		return
-	}
-
-	dec := gob.NewDecoder(bytes.NewReader(msgB[1 : len(msgB)-1]))
-	switch messageType(msgB[0]) {
+	packetSize := btoi32(b)
+	dec := gob.NewDecoder(bytes.NewReader(b[5:4+packetSize]))
+	switch messageType(b[4]) {
 	case ping:
 		m.handlePing(dec, from)
-		gossipB, err := io.ReadAll(reader)
+		gossipB, err := io.ReadAll(bytes.NewReader(b[4+packetSize:]))
 		if err != nil && err != io.EOF {
 			m.logger.Printf("[ERROR] Failed to read gossip bytes from packet: %v", err)
 			return
@@ -287,7 +274,7 @@ func (m *Member) handlePacket(b []byte, from net.Addr) {
 	case ack:
 		m.handleAck(dec, from)
 	default:
-		m.logger.Printf("[ERROR] Invalid message type (%v) is not available.", msgB[0])
+		m.logger.Printf("[ERROR] Invalid message type (%v) is not available.", b[5])
 		return
 	}
 
@@ -542,7 +529,7 @@ func (m *Member) sendIndirectPing(send *Node) {
 	select {
 	case <-responded:
 		return
-	case <-time.After(m.conf.PingInterval - m.conf.PingTimeout):
+	case <-time.After(m.conf.PingTimeout):
 		m.logger.Printf("[CHANGE] Node %v has failed to respond and is now considered Dead.", send.Name)
 		m.setDeadNode(send)
 		deadGossip := Gossip{
@@ -558,13 +545,13 @@ func (m *Member) sendIndirectPing(send *Node) {
 // handleConn will use the provided connection and do the appropriate operations
 // depending on the message type.
 func (m *Member) handleConn(conn net.Conn) {
-	msgT := make([]byte, 1)
-	if _, err := io.ReadAtLeast(conn, msgT, 1); err != nil {
+	msgT := make([]byte, 5)
+	if _, err := io.ReadAtLeast(conn, msgT, 5); err != nil {
 		m.logger.Printf("[ERROR] Failed to read from connection: %v", err)
 		return
 	}
 
-	switch messageType(msgT[0]) {
+	switch messageType(msgT[4]) {
 	case joinSync:
 		dec := gob.NewDecoder(conn)
 		joiningPeer := &Node{}
@@ -753,6 +740,22 @@ func encodeMessage(tp messageType, e interface{}) ([]byte, error) {
 	if err := enc.Encode(e); err != nil {
 		return nil, err
 	}
-	buf.Write([]byte{packetDelim})
-	return buf.Bytes(), nil
+	packetSize := i32tob(uint32(buf.Len()))
+	return append(packetSize, buf.Bytes()...), nil
+}
+
+func i32tob(val uint32) []byte {
+	r := make([]byte, 4)
+	for i := uint32(0); i < 4; i++ {
+		r[i] = byte((val >> (8 * i)) & 0xff)
+	}
+	return r
+}
+
+func btoi32(val []byte) uint32 {
+	r := uint32(0)
+	for i := uint32(0); i < 4; i++ {
+		r |= uint32(val[i]) << (8 * i)
+	}
+	return r
 }

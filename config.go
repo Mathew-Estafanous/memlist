@@ -52,7 +52,7 @@ func DefaultLocalConfig() *Config {
 		Name:           host,
 		BindAddr:       "127.0.0.1",
 		BindPort:       7990,
-		PingTimeout:    200 * time.Millisecond,
+		PingTimeout:    300 * time.Millisecond,
 		PingInterval:   1 * time.Second,
 		IndirectChecks: 1,
 		TCPTimeout:     15 * time.Second,
