@@ -145,6 +145,10 @@ func (m *Member) Join(addr string) error {
 	}
 
 	for _, v := range peerState {
+		if v.Name == m.conf.Name {
+			continue
+		}
+
 		n := v
 		m.addNewNode(&n)
 	}
@@ -259,7 +263,7 @@ func (m *Member) streamListen() {
 
 func (m *Member) handlePacket(b []byte, from net.Addr) {
 	packetSize := btoi32(b)
-	dec := gob.NewDecoder(bytes.NewReader(b[5:4+packetSize]))
+	dec := gob.NewDecoder(bytes.NewReader(b[5 : 4+packetSize]))
 	switch messageType(b[4]) {
 	case ping:
 		m.handlePing(dec, from)
@@ -559,6 +563,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			m.logger.Printf("[ERROR] Failed to decode message from joining peer: %v", err)
 			return
 		}
+		m.logger.Printf("[INFO] Syncing with node %v", joiningPeer.Name)
 
 		m.nodeMu.Lock()
 		// Add self in node map since the peer will need to add this member as well as all others.
@@ -596,14 +601,11 @@ func (m *Member) handleConn(conn net.Conn) {
 	}
 }
 
-// addNewNode will add the node to the map and return true as long as there are no
-// duplicates found. Otherwise, the result will be false.
+// addNewNode will add the node to the map and return true as long as the node is new
+// to the cluster otherwise, the return will be false.
 func (m *Member) addNewNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
-	if _, ok := m.nodeMap[n.Name]; ok {
-		return false
-	}
 
 	m.nodeMap[n.Name] = n
 	m.aliveNodes++
@@ -618,6 +620,10 @@ func (m *Member) addNewNode(n *Node) bool {
 
 	// notify listener of new peer being added to the cluster.
 	m.listener.OnMembershipChange(*n)
+
+	if _, ok := m.nodeMap[n.Name]; ok {
+		return false
+	}
 	return true
 }
 
@@ -636,6 +642,7 @@ func (m *Member) setDeadNode(n *Node) bool {
 
 			// notify listener of peer being considered dead.
 			m.listener.OnMembershipChange(*n)
+			m.logger.Println("[CHANGE] Cluster change:", m.pingList)
 			return true
 		}
 	}
