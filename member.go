@@ -37,6 +37,8 @@ func (n *Node) String() string {
 	return fmt.Sprintf("[%s | %s]", n.Name, n.Addr)
 }
 
+// handler is expected to be called when the associated ack response has been received.
+// It will properly handle the response and do whateverl logic is required.
 type handler func(a ackResp, from net.Addr)
 
 type Member struct {
