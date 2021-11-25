@@ -58,3 +58,25 @@ func TestNetTransport_DialAndConnect(t *testing.T) {
 		t.Fatalf("Failed to receive TCP connection within a reasonable time.")
 	}
 }
+
+func TestNetTransport_Packets(t *testing.T) {
+	transport, err := NewNetTransport("127.0.0.1", 8080)
+	require.NoError(t, err)
+
+	udpAddr := &net.UDPAddr{Port: 8090, IP: net.ParseIP("127.0.0.1")}
+	udpCon, err := net.ListenUDP("udp", udpAddr)
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:8080")
+	assert.NoError(t, err)
+
+	msg := []byte{'h', 'e', 'l', 'l', 'o'}
+	_, err = udpCon.WriteTo(msg, addr)
+	assert.NoError(t, err)
+
+	select {
+	case packet := <- transport.Packets():
+		assert.Equal(t, packet.Buf, msg)
+		assert.Equal(t, packet.From.String(), udpAddr.String())
+	case <- time.After(500 * time.Millisecond):
+		t.Fatalf("Did not receive packet through transport channel.")
+	}
+}
