@@ -80,3 +80,17 @@ func TestNetTransport_Packets(t *testing.T) {
 		t.Fatalf("Did not receive packet through transport channel.")
 	}
 }
+
+func TestNetTransport_Stream(t *testing.T) {
+	transport, err := NewNetTransport("127.0.0.1", 8080)
+	require.NoError(t, err)
+
+	_, err = net.Dial("tcp", "127.0.0.1:8080")
+	require.NoError(t, err)
+
+	select {
+	case <- transport.Stream():
+	case <- time.After(500 * time.Millisecond):
+		t.Fatalf("Did not receive TCP connection from stream in time.")
+	}
+}
