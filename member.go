@@ -718,7 +718,7 @@ func (m *Member) handleGossips(b []byte) {
 // piggyBackGossip will append a byte slice containing data regarding the
 // gossip events in the queue and return the resulting complete slice.
 func (m *Member) piggyBackGossip(b []byte) []byte {
-	buff, err := m.eventQueue.getGossipEvents(gossipLimit)
+	buff, err := m.eventQueue.getGossipEvents(m.conf.PiggyBackLimit)
 	if err != nil {
 		m.logger.Printf("[WARNING] Failed to get byte-slice representation of gossip: %v", err)
 	} else {

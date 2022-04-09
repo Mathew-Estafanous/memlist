@@ -17,8 +17,6 @@ const (
 	dead
 )
 
-const gossipLimit = 3
-
 // Gossip represents a message that is sent to peers regarding changes
 // in the state of the cluster and other nodes.
 type Gossip struct {

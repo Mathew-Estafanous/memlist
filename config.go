@@ -19,11 +19,21 @@ type Config struct {
 	// PingInterval is the time between attempts at random pings towards
 	// another Node. Decreasing the interval will result in more frequent
 	// checks at the cost of increased bandwidth usage.
-	//
+	PingInterval time.Duration
 	// PingTimeout is the timeout a Node will wait for an ACK response from
 	// any member before determining that the Node is potentially unhealthy.
-	PingInterval time.Duration
-	PingTimeout  time.Duration
+	PingTimeout time.Duration
+
+	// PiggyBackLimit is used as the maximum number of gossip events that are added
+	// (piggyback) off of a Node's ping/ack messages.
+	//
+	// Consider a slider when determining the limit. The lower the limit the smaller
+	// the messages and latency will decrease; however, gossip events will take
+	// longer to disseminate. Opposite, when increasing the limit, messages will
+	// be larger and latency increases while gossip will spread exponentially faster.
+	//
+	// DefaultLocalConfig chooses 4 as an arbitrary limit.
+	PiggyBackLimit int
 
 	// IndirectChecks is the number of nodes that will be contacted in the case
 	// that an indirect sendPing is required. Increasing the number of checks will
@@ -54,6 +64,7 @@ func DefaultLocalConfig() *Config {
 		BindPort:       7990,
 		PingTimeout:    300 * time.Millisecond,
 		PingInterval:   1 * time.Second,
+		PiggyBackLimit: 4,
 		IndirectChecks: 1,
 		TCPTimeout:     15 * time.Second,
 		EventListener:  &emptyListener{},
