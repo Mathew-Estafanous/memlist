@@ -159,7 +159,10 @@ func (n *NetTransport) Stream() <-chan net.Conn {
 func (n *NetTransport) Shutdown() error {
 	close(n.shutdown)
 	close(n.packetCh)
-	return n.udpCon.Close()
+	if n.udpCon != nil {
+		return n.udpCon.Close()
+	}
+	return nil
 }
 
 // listenForPacket will wait for a UDP packet sent to the connection and

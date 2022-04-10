@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"github.com/google/btree"
-	"reflect"
 	"testing"
 )
 
@@ -90,7 +89,13 @@ func TestGossipEventQueue_GetGossipEvents(t *testing.T) {
 		{Transmit: 1, Gossip: gossips[1]},
 		{Transmit: 0, Gossip: gossips[2]},
 	}
-	if !reflect.DeepEqual(result, expected) {
-		t.Fatal("Expected remaining events do not match the result.")
+	for i, res := range result {
+		expect := expected[i]
+		if expect.Transmit != res.Transmit {
+			t.Fatalf("Result event %d had transmit of %d instead of %d", i, res.Transmit, expect.Transmit)
+		}
+		if expect.Gossip != res.Gossip {
+			t.Fatalf("Result event %d had %v instead of %v", i, res.Gossip, expect.Gossip)
+		}
 	}
 }
