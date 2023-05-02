@@ -23,7 +23,7 @@ func main() {
 	}
 
 	if len(os.Args) >= 4 {
-		if err := mem.Join(":" + os.Args[3]); err != nil {
+		if err := mem.Join(":"+os.Args[3], ""); err != nil {
 			log.Fatalln(err)
 		}
 	}

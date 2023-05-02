@@ -1,8 +1,8 @@
 module github.com/Mathew-Estafanous/memlist
 
-go 1.16
+go 1.18
 
 require (
-	github.com/google/btree v1.0.1 // indirect
-	github.com/stretchr/testify v1.7.0 // indirect
+	github.com/google/btree v1.0.1
+	github.com/stretchr/testify v1.7.0
 )

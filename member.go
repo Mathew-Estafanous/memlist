@@ -31,6 +31,7 @@ type Node struct {
 	Addr  string
 	Port  uint16
 	State StateType
+	Data  any
 }
 
 func (n *Node) String() string {
@@ -111,7 +112,7 @@ func Create(conf *Config) (*Member, error) {
 // Join will attempt to join the member into a cluster of nodes by connecting
 // to the Node at the given address. An error will be return if the member
 // failed to join a cluster.
-func (m *Member) Join(addr string) error {
+func (m *Member) Join(addr string, data any) error {
 	if m.conf.TCPTimeout == 0 {
 		m.conf.TCPTimeout = 10 * time.Second
 	}
@@ -126,6 +127,7 @@ func (m *Member) Join(addr string) error {
 		Addr:  m.conf.BindAddr,
 		Port:  m.conf.BindPort,
 		State: Alive,
+		Data:  data,
 	}
 	b, err := encodeMessage(joinSync, &n)
 	if err != nil {
