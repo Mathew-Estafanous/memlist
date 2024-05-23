@@ -575,6 +575,7 @@ func (m *Member) handleConn(conn net.Conn) {
 			Name: m.conf.Name,
 			Addr: m.conf.BindAddr,
 			Port: m.conf.BindPort,
+			Data: m.conf.MetaData,
 		}
 		b, err := encodeMessage(joinSync, m.nodeMap)
 		if err != nil {
