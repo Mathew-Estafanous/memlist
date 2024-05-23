@@ -16,6 +16,11 @@ type Config struct {
 	BindAddr string
 	BindPort uint16
 
+	// MetaData is an optional field that can be used to store any relevant
+	// information about the member node. This field will be passed along with
+	// any gossip events that are sent to other nodes.
+	MetaData any
+
 	// PingInterval is the time between attempts at random pings towards
 	// another Node. Decreasing the interval will result in more frequent
 	// checks at the cost of increased bandwidth usage.
