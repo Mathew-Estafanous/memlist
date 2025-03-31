@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/Mathew-Estafanous/memlist"
 	"log"
+	"net"
 	"os"
 	"strconv"
 )
@@ -15,6 +16,11 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	ip := GetLocalIP()
+	if ip != "" {
+		conf.BindAddr = ip
+	}
 	conf.BindPort = uint16(port)
 
 	mem, err := memlist.Create(conf)
@@ -23,11 +29,27 @@ func main() {
 	}
 
 	if len(os.Args) >= 4 {
-		if err := mem.Join(":"+os.Args[3], ""); err != nil {
+		if err := mem.Join(os.Args[3]); err != nil {
 			log.Fatalln(err)
 		}
 	}
 
 	stop := make(chan bool)
 	<-stop
+}
+
+func GetLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }
