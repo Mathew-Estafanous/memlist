@@ -1,6 +1,7 @@
 package memlist
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -159,10 +160,15 @@ func (n *NetTransport) Stream() <-chan net.Conn {
 func (n *NetTransport) Shutdown() error {
 	close(n.shutdown)
 	close(n.packetCh)
+	var udpErr, tcpErr error
 	if n.udpCon != nil {
-		return n.udpCon.Close()
+		udpErr = n.udpCon.Close()
 	}
-	return nil
+
+	if n.tcpLsn != nil {
+		tcpErr = n.tcpLsn.Close()
+	}
+	return errors.Join(udpErr, tcpErr)
 }
 
 // listenForPacket will wait for a UDP packet sent to the connection and

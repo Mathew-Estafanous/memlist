@@ -97,17 +97,17 @@ func (q *gossipEventQueue) queueEvent(g Gossip, notify chan struct{}) {
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	var remove []*gossipEvent
+	var removeEvents []*gossipEvent
 	q.bt.Ascend(func(i btree.Item) bool {
 		o := i.(*gossipEvent)
 		if o.Gossip.invalidates(ge.Gossip) {
-			remove = append(remove, o)
+			removeEvents = append(removeEvents, o)
 			return false
 		}
 		return true
 	})
 
-	for _, e := range remove {
+	for _, e := range removeEvents {
 		_ = q.bt.Delete(e)
 	}
 	_ = q.bt.ReplaceOrInsert(ge)
