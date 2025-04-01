@@ -96,8 +96,8 @@ type NetTransport struct {
 func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	ok := true
 	t := &NetTransport{
-		packetCh: make(chan *Packet),
-		streamCh: make(chan net.Conn),
+		packetCh: make(chan *Packet, 5),
+		streamCh: make(chan net.Conn, 5),
 		shutdown: make(chan struct{}),
 	}
 	defer func() {

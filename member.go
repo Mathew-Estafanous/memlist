@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -117,6 +118,7 @@ func (m *Member) Join(addr string) error {
 		m.conf.TCPTimeout = 10 * time.Second
 	}
 	conn, err := m.transport.DialAndConnect(addr, m.conf.TCPTimeout)
+	defer conn.Close()
 	if err != nil {
 		m.logger.Printf("[ERROR] Failed to connect to host address: %v", err)
 		return fmt.Errorf("failed to connect to %s: %v", addr, err)
@@ -137,15 +139,18 @@ func (m *Member) Join(addr string) error {
 
 	if _, err = conn.Write(b); err != nil {
 		m.logger.Printf("[ERROR] Failed to send sync message to the host address: %v", err)
-		return fmt.Errorf("failed to join cluster: %v", err)
+		return fmt.Errorf("failed to join cluster: %w", err)
 	}
 
 	var peerState map[string]Node
-	io.ReadAtLeast(conn, make([]byte, 4), 4)
+	_, err = io.ReadAtLeast(conn, make([]byte, 4), 4)
+	if err != nil {
+		return fmt.Errorf("failed to read join sync message: %w", err)
+	}
 	dec := gob.NewDecoder(conn)
 	if err = dec.Decode(&peerState); err != nil {
 		m.logger.Printf("[ERROR] Failed to decode received message: %v", err)
-		return fmt.Errorf("failed to sync with peer: %v", err)
+		return fmt.Errorf("failed to sync with peer: %w", err)
 	}
 
 	for _, v := range peerState {
@@ -258,7 +263,7 @@ func (m *Member) streamListen() {
 	for {
 		select {
 		case conn := <-m.transport.Stream():
-			m.handleConn(conn)
+			go m.handleConn(conn)
 		case <-m.shutdownCh:
 			return
 		}
@@ -612,6 +617,10 @@ func (m *Member) addNewNode(n *Node) bool {
 	m.nodeMu.Lock()
 	defer m.nodeMu.Unlock()
 
+	if slices.Contains(m.pingList, n.Name) {
+		return false
+	}
+
 	m.nodeMap[n.Name] = n
 	m.aliveNodes++
 
@@ -625,10 +634,6 @@ func (m *Member) addNewNode(n *Node) bool {
 
 	// notify listener of new peer being added to the cluster.
 	m.listener.OnMembershipChange(*n)
-
-	if _, ok := m.nodeMap[n.Name]; ok {
-		return false
-	}
 	return true
 }
 
@@ -694,25 +699,25 @@ func (m *Member) handleGossips(b []byte) {
 			continue
 		}
 
-		var success bool
+		var succeeded bool
 		switch g.Gossip.Gt {
 		case join:
-			success = m.addNewNode(&g.Gossip.Node)
+			succeeded = m.addNewNode(&g.Gossip.Node)
 		case leave:
-			success = m.removeNode(&g.Gossip.Node)
-			if success {
+			succeeded = m.removeNode(&g.Gossip.Node)
+			if succeeded {
 				m.logger.Printf("[CHANGE] Node %v has left the cluster.", g.Gossip.Node.Name)
 			}
 		case dead:
-			success = m.setDeadNode(&g.Gossip.Node)
-			if success {
+			succeeded = m.setDeadNode(&g.Gossip.Node)
+			if succeeded {
 				m.logger.Printf("[WARNING] Node %v has failed and is considered dead.", g.Gossip.Node.Name)
 			}
 		}
 
 		// if the gossip was successful, then we should add it to the queue to then
 		// be spread to peers.
-		if success {
+		if succeeded {
 			m.eventQueue.queue(g.Gossip)
 		}
 	}
