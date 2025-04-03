@@ -3,6 +3,7 @@ package memlist
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"time"
@@ -66,16 +67,16 @@ type Transport interface {
 
 	// DialAndConnect will create a connection to another peer allowing for a
 	// direct two-way connection between both peers.
-	DialAndConnect(addr string, timeout time.Duration) (net.Conn, error)
+	DialAndConnect(addr string, timeout time.Duration) (io.ReadWriteCloser, error)
 
 	// Packets returns a channel that is used to receive incoming packets
 	// from other peers.
 	Packets() <-chan *Packet
 
 	// Stream returns a read only channel that is used to receive incoming
-	// streamCh connections from other peers. A streamCh is usually sent during
+	// connections from other peers. A stream connection is usually sent during
 	// attempts at syncing state between two peers.
-	Stream() <-chan net.Conn
+	Stream() <-chan io.ReadWriteCloser
 
 	// Shutdown allows for the transport to clean up all listeners safely.
 	Shutdown() error
@@ -88,7 +89,7 @@ type NetTransport struct {
 	tcpLsn *net.TCPListener
 
 	packetCh chan *Packet
-	streamCh chan net.Conn
+	streamCh chan io.ReadWriteCloser
 	shutdown chan struct{}
 }
 
@@ -98,7 +99,7 @@ func NewNetTransport(addr string, port uint16) (*NetTransport, error) {
 	ok := true
 	t := &NetTransport{
 		packetCh: make(chan *Packet, 5),
-		streamCh: make(chan net.Conn, 5),
+		streamCh: make(chan io.ReadWriteCloser, 5),
 		shutdown: make(chan struct{}),
 	}
 	defer func() {
@@ -140,7 +141,7 @@ func (n *NetTransport) SendTo(b []byte, addr string) error {
 	return nil
 }
 
-func (n *NetTransport) DialAndConnect(addr string, timeout time.Duration) (net.Conn, error) {
+func (n *NetTransport) DialAndConnect(addr string, timeout time.Duration) (io.ReadWriteCloser, error) {
 	d := &net.Dialer{Timeout: timeout}
 	conn, err := d.Dial("tcp", addr)
 	if err != nil {
@@ -153,7 +154,7 @@ func (n *NetTransport) Packets() <-chan *Packet {
 	return n.packetCh
 }
 
-func (n *NetTransport) Stream() <-chan net.Conn {
+func (n *NetTransport) Stream() <-chan io.ReadWriteCloser {
 	return n.streamCh
 }
 

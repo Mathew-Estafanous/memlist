@@ -2,6 +2,7 @@ package memlist
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 )
 
@@ -35,16 +36,6 @@ func encodeMessage(tp messageType, e interface{}) ([]byte, error) {
 
 func i32tob(val uint32) []byte {
 	r := make([]byte, 4)
-	for i := uint32(0); i < 4; i++ {
-		r[i] = byte((val >> (8 * i)) & 0xff)
-	}
-	return r
-}
-
-func btoi32(val []byte) uint32 {
-	r := uint32(0)
-	for i := uint32(0); i < 4; i++ {
-		r |= uint32(val[i]) << (8 * i)
-	}
+	binary.LittleEndian.PutUint32(r, val)
 	return r
 }

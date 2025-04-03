@@ -2,6 +2,7 @@ package memlist
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
 	"github.com/google/btree"
@@ -271,7 +272,7 @@ func (m *Member) streamListen() {
 }
 
 func (m *Member) handlePacket(b []byte, from net.Addr) {
-	packetSize := btoi32(b)
+	packetSize := binary.LittleEndian.Uint32(b[:4])
 	dec := gob.NewDecoder(bytes.NewReader(b[5 : 4+packetSize]))
 	switch messageType(b[4]) {
 	case ping:
@@ -557,7 +558,7 @@ func (m *Member) sendIndirectPing(send *Node) {
 
 // handleConn will use the provided connection and do the appropriate operations
 // depending on the message type.
-func (m *Member) handleConn(conn net.Conn) {
+func (m *Member) handleConn(conn io.ReadWriteCloser) {
 	msgT := make([]byte, 5)
 	if _, err := io.ReadAtLeast(conn, msgT, 5); err != nil {
 		m.logger.Printf("[ERROR] Failed to read from connection: %v", err)
