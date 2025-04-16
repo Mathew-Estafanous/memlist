@@ -440,9 +440,15 @@ func (m *Member) sendPing() {
 		m.pingIdx = 0
 	}
 	name := m.pingList[m.pingIdx]
-	sendNode := m.nodeMap[name]
+	sendNode, ok := m.nodeMap[name]
 	m.pingIdx++
 	m.nodeMu.Unlock()
+
+	// Check if the node exists in the map
+	if !ok {
+		m.logger.Printf("[WARNING] Node %s from ping list not found in node map", name)
+		return
+	}
 
 	// Make ping/ping request and send it to the selected Node.
 	p := &pingReq{
