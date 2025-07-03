@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	"github.com/google/btree"
 	"math"
 	"sync"
+
+	"github.com/google/btree"
 )
 
 type gossipType uint8

@@ -3,8 +3,9 @@ package memlist
 import (
 	"bytes"
 	"encoding/gob"
-	"github.com/google/btree"
 	"testing"
+
+	"github.com/google/btree"
 )
 
 func newGossipEventQueue() *gossipEventQueue {

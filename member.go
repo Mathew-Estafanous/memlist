@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
-	"github.com/google/btree"
 	"io"
 	"log"
 	"math/rand"
@@ -16,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/btree"
 )
 
 type StateType int
@@ -119,11 +120,11 @@ func (m *Member) Join(addr string) error {
 		m.conf.TCPTimeout = 10 * time.Second
 	}
 	conn, err := m.transport.DialAndConnect(addr, m.conf.TCPTimeout)
-	defer conn.Close()
 	if err != nil {
 		m.logger.Printf("[ERROR] Failed to connect to host address: %v", err)
 		return fmt.Errorf("failed to connect to %s: %v", addr, err)
 	}
+	defer conn.Close()
 
 	n := Node{
 		Name:  m.conf.Name,
@@ -392,7 +393,7 @@ func (m *Member) handleAck(dec *gob.Decoder, from net.Addr) {
 	ah, ok := m.ackHandlers[a.ReqNo]
 	delete(m.ackHandlers, a.ReqNo)
 	if !ok {
-		log.Printf("[WARNING] Couldn't find a ah for sequence number %v", a.ReqNo)
+		m.logger.Printf("[WARNING] Couldn't find an ak for sequence number %v", a.ReqNo)
 		return
 	}
 	ah(a, from)
@@ -410,6 +411,7 @@ func (m *Member) addAckHandler(h handler, seqNo uint32, timeout time.Duration) {
 	time.AfterFunc(timeout, func() {
 		m.ackMu.Lock()
 		defer m.ackMu.Unlock()
+		m.logger.Printf("[WARNING] Ack handler for seq. number %v timed out.", seqNo)
 		delete(m.ackHandlers, seqNo)
 	})
 }
